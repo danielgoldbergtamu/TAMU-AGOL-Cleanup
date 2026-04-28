@@ -1,0 +1,10 @@
+Dear {recipient_name},
+
+Our records indicate that your affiliation with Texas A&M has changed (i.e. you are a graduated student, a retired staff member, etc.), and that you also have items published to Texas A&M's central ArcGIS Online portal. As a result, your account's item's are scheduled to be deleted one month from now. Please consider migrating data to an external data store if you would like to keep it for later use.
+
+If you have questions, comments or concerns, please review Texas A&M's ArcGIS Online policies (https://service.tamu.edu/TDClient/36/Portal/KB/ArticleDet?ID=1701) and contact the Texas A&M GIS Help Desk: Tx.ag/GISHelpDesk.
+
+This is an auto-generated email sent to the email on file for the ArcGIS account {recipient_username}, as well as any on-record supervisors of the account owner. If this email does not apply, please disregard.
+
+Best regards,
+Texas A&M GIS Help Desk

@@ -1,0 +1,12 @@
+Dear {recipient_name},
+
+This email serves to inform you that your ArcGIS Online account, {recipient_username}, will be deleted shortly either due to a lack of items published or due to a change in affiliation within Texas A&M (i.e. graduated student, retired employee, etc.).
+
+If you are still affiliated with Texas A&M and had an empty account, you can re-generate your account by logging into ArcGIS Pro using your Texas A&M NetID if necessary.
+
+If you have questions, comments or concerns, please review Texas A&M's ArcGIS Online policies (https://service.tamu.edu/TDClient/36/Portal/KB/ArticleDet?ID=1701) and contact the Texas A&M GIS Help Desk: Tx.ag/GISHelpDesk.
+
+This is an auto-generated email sent to the email on file for the ArcGIS account {recipient_username}, as well as any on-record supervisors of the account owner. If this email does not apply, please disregard.
+
+Best regards,
+Texas A&M GIS Help Desk

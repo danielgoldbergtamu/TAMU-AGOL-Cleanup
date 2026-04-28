@@ -1,0 +1,14 @@
+Dear {recipient_name},
+
+Our records indicate that your ArcGIS Online account is currently using {total_feature_storage_mb} MB of storage, which exceeds the allocated quota of {USER_STORAGE_QUOTA_MB} MB.
+
+Please review your published items and consider removing any unnecessary content or requesting additional credits if needed.
+
+If you have any questions or need assistance, please review Texas A&M's ArcGIS Online policies (https://service.tamu.edu/TDClient/36/Portal/KB/ArticleDet?ID=1701) and contact the Texas A&M GIS Help Desk at tx.ag/GISHelpDesk.
+
+This is an automated message sent to the email address associated with ArcGIS Online account {recipient_username}. If you believe you received this message in error, please contact the Texas A&M GIS Help Desk.
+
+Thank you for your attention to this matter.
+
+Best regards,
+Texas A&M GIS Help Desk
