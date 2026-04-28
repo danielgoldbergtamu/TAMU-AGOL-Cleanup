@@ -178,6 +178,10 @@ This repo uses a .env file to define certain paramaters that are shared across a
 
     5. SMTP_PORT : change to the SMTP port number for the project (e.g 587)
 
+## V. Scheduling Scripts using Task Scheduler
+
+1. Refer to the [Task Scheduler Guide](guides/Task%20Scheduler.md) in this repo.
+
 
 
 
