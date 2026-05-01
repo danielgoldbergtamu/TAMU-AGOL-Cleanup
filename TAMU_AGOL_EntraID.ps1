@@ -16,6 +16,15 @@ param(
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 Set-Location -Path $scriptDir
 
+if (-not [System.IO.Path]::IsPathRooted($input_csv_path)) {
+    $input_csv_path = Join-Path $scriptDir $input_csv_path
+}
+
+if (-not (Test-Path $input_csv_path)) {
+    throw "Input CSV not found: $input_csv_path"
+}
+$input_csv = Import-Csv -Path $input_csv_path
+
 
 # Import library for accessing TAMU Identification System - uses OS authentication
 Import-Module Microsoft.Graph.Users

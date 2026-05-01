@@ -23,6 +23,8 @@ import os
 from os import getenv
 from dotenv import load_dotenv
 
+from TAMU_AGOL_UserQuotas import collect_table_names
+
 
 # GLOBAL VARIABLES & INITIALIZATION
 ############################################################################################
@@ -251,11 +253,13 @@ def Delete_Users(delete_status_df):
 
 def main():
     entraid_table_name = collect_entraid_table_name()
+
     delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME)
     entraid_status_df = pd.read_sql(text(f"SELECT * FROM AGOL_EntraID_Status"), engine)
 
-    Calculate_Delete_Status(delete_status_df,entraid_status_df)
-    Delete_Users(delete_status_df)
+    member_table_name, item_table_name = collect_table_names()
+    Calculate_Delete_Status(delete_status_df,entraid_status_df, get_empty_users(member_table_name, item_table_name))
+    # Delete_Users(delete_status_df)
 
     
 

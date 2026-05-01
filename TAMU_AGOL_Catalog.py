@@ -26,6 +26,93 @@ CURRENT_DATE = datetime.datetime.now().date()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
 
+
+# Duplicate row SQL queries: these are used to remove rows that are duplicated in the history tables but have no updated
+# attributes. When table schema is changed, these queries will need to be updated to reflect the new columns. 
+# The queries keep the most recent record and delete the older duplicates.
+
+
+ITEM_HIST_DUPLICATE_QUERY = """
+WITH CTE AS (
+    SELECT *,
+        ROW_NUMBER() OVER (
+            PARTITION BY [Item ID]
+                        ,[Item Url]
+                        ,[Item Type]
+                        ,[Date Created]
+                        ,[Date Modified]
+                        ,[Content Category]
+                        ,[View Counts]
+                        ,[Owner]
+                        ,[File Storage Size]
+                        ,[Feature Storage Size]
+                        ,[Share Level]
+                        ,[# of Groups shared with]
+                        ,[Tags]
+                        ,[Number of Comments]
+                        ,[Is Hosted Service]
+                        ,[Date Last Viewed]
+                        ,[In Recycle Bin]
+            ORDER BY [updated_date] DESC
+        ) AS rn
+    FROM dbo.HIST_OrganizationItems
+)
+DELETE FROM CTE WHERE rn > 1;
+"""
+
+MEMBER_HIST_DUPLICATE_QUERY = """
+WITH CTE AS (
+    SELECT *,
+        ROW_NUMBER() OVER (
+            PARTITION BY [Username]
+      			,[Name]
+      			,[Email]
+      			,[Profile Visibility]
+      			,[My Esri Access]
+      			,[User Type]
+      			,[Role]
+      			,[Available Credits]
+      			,[Assigned Credits]
+      			,[Last Login Date]
+      			,[Date Created]
+      			,[Add-On Apps]
+      			,[# of Items Owned]
+      			,[# of Groups Owned]
+      			,[# of Groups Total]
+      			,[Login Type]
+      			,[Member Account Status]
+      			,[Verified Email Status]
+      			,[Multifactor Authentication Exempt]
+      			,[Member Categories]
+      			,[Multifactor Authentication]
+            ORDER BY [updated_date] DESC
+        ) AS rn
+    FROM dbo.HIST_OrganizationMembers
+)
+DELETE FROM CTE WHERE rn > 1;
+"""
+
+ENTRAID_HIST_DUPLICATE_QUERY = """
+WITH CTE AS (
+    SELECT *,
+        ROW_NUMBER() OVER (
+            PARTITION BY [Username]
+      			,[Email]
+      			,[Name]
+      			,[EntraID_Status]
+      			,[ManagerEmail]
+      			,[Groups]
+      			,[WorkingEmail]
+      			,[EmailsTried]
+      			,[UserDepartment]
+      			,[ManagerDepartment]
+            ORDER BY [updated_date] DESC
+        ) AS rn
+    FROM dbo.HIST_EntraID_Status
+)
+DELETE FROM CTE WHERE rn > 1;
+"""
+
 # Load environment variables from .env file
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
@@ -221,6 +308,8 @@ def fetch_reports():
 def Collect_EntraID_Information(member_report_csv_path):
     """Calls TAMU_AGOL_EntraID.ps1 to collect EntraID information for each user in the member report and write to a CSV."""
 
+    member_report_csv_path = os.path.abspath(os.path.join(SCRIPT_DIR, member_report_csv_path))
+
     # Run the PowerShell script to collect EntraID information for each user in the member report and write to CSV
     result = subprocess.Popen(
     [
@@ -247,13 +336,17 @@ def Collect_EntraID_Information(member_report_csv_path):
         print(f"Errors: {stderr_output}")
 
     if result.returncode != 0:
-        print(f"Error executing PowerShell script: {result.stderr}")
+        raise RuntimeError("PowerShell EntraID collection failed; see errors above.")
+
+    entraid_status_path = os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv')
+    if not os.path.exists(entraid_status_path):
+        raise FileNotFoundError(f"Expected EntraID status report was not created: {entraid_status_path}")
     
     # Add date to each row in the csv file
     print("adding updated_date to EntraID status report...")
-    entraid_status_df = pd.read_csv(os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv'))
+    entraid_status_df = pd.read_csv(entraid_status_path)
     entraid_status_df['updated_date'] = CURRENT_DATE
-    entraid_status_df.to_csv(os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv'), index=False)
+    entraid_status_df.to_csv(entraid_status_path, index=False)
 
 
 def Upload_Tables_to_Database(item_report_df, member_report_df, entraid_status_path, item_report_title, member_report_title):
@@ -311,7 +404,10 @@ def Catalog_and_Cleanup():
                 if exists[0] is None:
                     connection.execute(text(f"SELECT * INTO [{item_history_table_title}] FROM [{table_name}]"))
                 else:
+                    print(f"Updating history table with data from {table_name} by matching columns...")
                     insert_by_matching_columns(connection, item_history_table_title, table_name)
+                    print(f"Removing duplicate rows from {item_history_table_title}...")
+                    connection.execute(text(ITEM_HIST_DUPLICATE_QUERY))
                 connection.execute(text(f"DROP TABLE [{table_name}]"))
                 connection.commit()  # Commit after each operation
         else:
@@ -326,7 +422,10 @@ def Catalog_and_Cleanup():
                 if exists[0] is None:
                     connection.execute(text(f"SELECT * INTO [{member_history_table_title}] FROM [{table_name}]"))
                 else:
+                    print(f"Updating history table with data from {table_name} by matching columns...")
                     insert_by_matching_columns(connection, member_history_table_title, table_name)
+                    print(f"Removing duplicate rows from {member_history_table_title}...")
+                    connection.execute(text(MEMBER_HIST_DUPLICATE_QUERY))
                 connection.execute(text(f"DROP TABLE [{table_name}]"))
                 connection.commit()
         else:
@@ -340,7 +439,10 @@ def Catalog_and_Cleanup():
             if exists[0] is None:
                 connection.execute(text(f"SELECT * INTO [{entraid_status_history_table_title}] FROM [{table_name}]"))
             else:
+                print(f"Updating history table with data from {table_name} by matching columns...")
                 insert_by_matching_columns(connection, entraid_status_history_table_title, table_name)
+                print(f"Removing duplicate rows from {entraid_status_history_table_title}...")
+                connection.execute(text(ENTRAID_HIST_DUPLICATE_QUERY))
             connection.execute(text(f"DROP TABLE [{table_name}]"))
             connection.commit()
         else:

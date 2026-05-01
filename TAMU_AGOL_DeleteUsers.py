@@ -15,6 +15,9 @@ import datetime
 import os
 from os import getenv
 
+# Load environment variables FIRST, before accessing any getenv() calls
+load_dotenv()
+
 # GLOBAL VARIABLES & INITIALIZATION
 ############################################################################################
 
@@ -25,7 +28,6 @@ ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
 DELETE_STATUS_TABLE_NAME = getenv("DELETE_STATUS_TABLE_NAME")
 
 # Connect to SQL Server using SQLALchemy
-load_dotenv()
 sql_connection_string = (getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
 if not sql_connection_string:
     raise RuntimeError(
