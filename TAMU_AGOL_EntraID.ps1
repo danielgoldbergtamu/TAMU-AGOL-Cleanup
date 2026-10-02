@@ -40,12 +40,12 @@ Write-Host "Cached $($allEntraUsers.Count) EntraID users"
 # Helper functions for user resolution and data retrieval
 #######################################################################################################
 
-# Function to create a formatted email based on a username (i.e. username@tamu.edu)
+# Function to create a formatted email based on a username (i.e. username@tamu.edu)  # leak-check: allow
 function Format-Email {
     param([string]$username)
     $username = $username -replace '_tamu$', ''
     if ($username -match '@') { $username = $username.Split('@')[0] }
-    return "$username@tamu.edu"
+    return "$username@tamu.edu"  # leak-check: allow
 }
 
 # Function to resolve an EntraID user based on a list of formatted emails, using cached indexes for efficient lookup
