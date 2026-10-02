@@ -236,7 +236,10 @@ def record_supervisors(rows, run_date):
     if not url:
         print("SQL_CONNECTION_STRING not set; supervisor history NOT updated.")
         return
-    engine = create_engine(url)
+    if "://" in url:
+        engine = create_engine(url)
+    else:  # a raw ODBC connection string, as the other scripts also accept
+        engine = create_engine("mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(url))
     merge = text("""
         MERGE dbo.HIST_Supervisors AS t
         USING (SELECT :user AS UserEmail, :mgr AS ManagerEmail) AS s

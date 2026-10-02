@@ -121,7 +121,7 @@ def get_empty_users(member_table_name, item_table_name):
 # MAIN FUNCTIONS
 
 
-def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name):
+def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name, dry_run=False):
     """This function retrieves the DeleteStatus and Current OrganizationMembers tables from the database. If there is a member in the OrganizationMembers table that is not in the DeleteStatus table, they are added with a DeleteStatus of 0. This function serves to add newly created accounts to the DeleteStatus table so that they can be monitored for deletion if needed."""
 
     print ("Updating DeleteStatus table with any new users...")
@@ -147,88 +147,103 @@ def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name):
         # Append the new entries to the existing delete status DataFrame
         updated_delete_status_df = pd.concat([delete_status_df, new_delete_status_entries], ignore_index=True)
 
-        # Upload the updated delete status DataFrame back to the database
-        updated_delete_status_df.to_sql(delete_status_table_name, con=engine, if_exists='replace', index=False, dtype=deletestatus_sql_datatypes())
+        # Upload the updated delete status DataFrame back to the database (not in a dry run)
+        if not dry_run:
+            updated_delete_status_df.to_sql(delete_status_table_name, con=engine, if_exists='replace', index=False, dtype=deletestatus_sql_datatypes())
     
     return updated_delete_status_df if not new_users_df.empty else delete_status_df
 
 
 
-def Calculate_Delete_Status(delete_status_df,entraid_status_df, empty_users):
-    """This function calculates the deletion status for each user based on their EntraID status and updated dates, updates the database, and sends notification emails as needed."""
+def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dry_run=False):
+    """Recalculates every member's DeleteStatus from the latest EntraID lookup and writes it back.
+
+    Rules, applied to every member on every run (2 October 2026 rewrite, register AGOL-024):
+      - Override set                         -> 0
+      - owns nothing (empty account)         -> 2; FlagDate kept from the first time
+      - found in a current-affiliation group -> 0, at ANY earlier status. Before the rewrite only
+        status-0 members were checked, so a wrong flag could never clear and a flagged member moved
+        to 2 after 30 days whatever Entra said by then.
+      - no row in the lookup at all          -> unchanged. Missing data is not evidence of leaving.
+      - otherwise (not current): 0 -> 1 (flagged); 1 for 30+ days -> 2; else unchanged.
+
+    Every change is written to reports/DeleteStatus_changes_<date>.csv. The run refuses to save if
+    it would newly flag more than MAX_NEW_FLAG_FRACTION of the currently unflagged members (default
+    0.05), which in practice means the lookup is broken. With dry_run, nothing is saved.
+    """
 
     print ("Calculating delete status for users in DeleteStatus table...")
 
     whitelisted_groups_df = pd.read_sql(text(f"SELECT * FROM {WHITELISTED_ENTRAID_GROUPS_TABLE_NAME}"), engine)
-    whitelisted_group_ids = whitelisted_groups_df['ID'].tolist()
+    whitelisted_group_ids = {str(g).strip().lower() for g in whitelisted_groups_df['ID']}
 
-    unflagged_user_count = 0
-    flagged_user_count = 0
-    deleted_user_count = 0
+    lookup = {}
+    for r in entraid_status_df.itertuples():
+        groups = {g.strip().lower() for g in str(r.Groups or "").split(',') if g.strip()} if not pd.isna(r.Groups) else set()
+        lookup[str(r.Username).strip().lower()] = (r.EntraID_Status, groups)
+    empty_users = {str(u).strip().lower() for u in empty_users}
+
+    changes = []
+    unflagged_before = max(1, int((delete_status_df['DeleteStatus'] == 0).sum()))
+
+    def set_status(index, row, new_status, reason, flag_date="keep", delete_date="keep"):
+        if row.DeleteStatus != new_status:
+            changes.append({"Username": row.Username, "From": row.DeleteStatus, "To": new_status, "Reason": reason})
+        delete_status_df.at[index, 'DeleteStatus'] = new_status
+        if flag_date != "keep":
+            delete_status_df.at[index, 'FlagDate'] = flag_date
+        if delete_date != "keep":
+            delete_status_df.at[index, 'DeleteDate'] = delete_date
 
     for row in delete_status_df.itertuples():
+        username = str(row.Username).strip().lower()
+        entra = lookup.get(username)
 
-        try:
-            user_entraid_info = entraid_status_df[entraid_status_df['Username'] == row.Username]
-        except IndexError:
-            # If user is not found in the EntraID status table, assume they have already been deleted or are otherwise not active and set their status to 2 (marked for deletion)
-            delete_status_df.at[row.Index, 'DeleteStatus'] = 2
-            delete_status_df.at[row.Index, 'DeleteDate'] = CURRENT_DATE
+        if row.Override:
+            set_status(row.Index, row, 0, "override", None, None)
+
+        # Empty accounts are removed whatever their affiliation: they hold nothing, and an SSO
+        # account is recreated at its next login.
+        elif username in empty_users:
+            first_flag = row.FlagDate if row.DeleteStatus == 2 and not pd.isna(row.FlagDate) else CURRENT_DATE
+            set_status(row.Index, row, 2, "owns nothing", first_flag)
+
+        elif entra is None:
             continue
 
-        groups_value = user_entraid_info['Groups'].iloc[0] if not user_entraid_info.empty else None
-        if pd.isna(groups_value) or not str(groups_value).strip():
-            user_entraid_groups = []
-        else:
-            user_entraid_groups = [group_id.strip() for group_id in str(groups_value).split(',') if group_id.strip()]
-        user_entraid_status = user_entraid_info['EntraID_Status'].iloc[0] if not user_entraid_info.empty else None
-        
-        # If a user has an override, remove potential flags and move to next user
-        if row.Override:
-            delete_status_df.at[row.Index, 'DeleteStatus'] = 0
-            delete_status_df.at[row.Index, 'FlagDate'] = None
-            delete_status_df.at[row.Index, 'DeleteDate'] = None
-            unflagged_user_count += 1
-            print(f"User {row.Username} has an override enabled. Setting DeleteStatus to 0 and skipping further checks.")
+        elif entra[0] == 1 and entra[1] & whitelisted_group_ids:
+            set_status(row.Index, row, 0, "current affiliation", None, None)
 
-        # Delete all users with 0 items published regardless of EntraID Status, as they can automatically remake their account by logging into ArcGIS Pro.
-        elif row.Username in empty_users:
-            delete_status_df.at[row.Index, 'DeleteStatus'] = 2
-            delete_status_df.at[row.Index, 'FlagDate'] = CURRENT_DATE
-            flagged_user_count += 1
-            print(f"User {row.Username} has 0 items published. Setting DeleteStatus to 2.")
-
-        # Determine if an unflagged user should be flagged based on EntraID affiliations
         elif row.DeleteStatus == 0:
-            if user_entraid_status == 0:
-                delete_status_df.at[row.Index, 'DeleteStatus'] = 1
-                delete_status_df.at[row.Index, 'FlagDate'] = CURRENT_DATE
-                unflagged_user_count += 1
-            elif user_entraid_status == 1:
-                if any(group_id in whitelisted_group_ids for group_id in user_entraid_groups):
-                        delete_status_df.at[row.Index, 'DeleteStatus'] = 0
-                        delete_status_df.at[row.Index, 'FlagDate'] = None
-                        delete_status_df.at[row.Index, 'DeleteDate'] = None
-                        unflagged_user_count += 1
-                        continue
-                else:
-                    delete_status_df.at[row.Index, 'DeleteStatus'] = 1
-                    delete_status_df.at[row.Index, 'FlagDate'] = CURRENT_DATE
-                    flagged_user_count += 1
-        
-        # Determine if flagged users should be marked for deletion based on how long they have been flagged
-        elif row.DeleteStatus == 1 and row.FlagDate and (CURRENT_DATE - pd.Timestamp(row.FlagDate).date()).days >= 30:
-            delete_status_df.at[row.Index, 'DeleteStatus'] = 2
-            delete_status_df.at[row.Index, 'DeleteDate'] = CURRENT_DATE
-            deleted_user_count += 1
-        else:
-            unflagged_user_count += 1 if row.DeleteStatus == 0 else 0
-            flagged_user_count += 1 if row.DeleteStatus == 1 else 0
-            deleted_user_count += 1 if row.DeleteStatus == 2 else 0
+            set_status(row.Index, row, 1, "not found in Entra" if entra[0] == 0 else "no current-affiliation group",
+                       CURRENT_DATE)
 
-    print(f"Unflagged users: {unflagged_user_count}")
-    print(f"Flagged users: {flagged_user_count}")
-    print(f"Users to delete: {deleted_user_count}")
+        elif row.DeleteStatus == 1 and not pd.isna(row.FlagDate) and (CURRENT_DATE - pd.Timestamp(row.FlagDate).date()).days >= 30:
+            set_status(row.Index, row, 2, "flagged 30+ days", delete_date=CURRENT_DATE)
+
+    counts = delete_status_df['DeleteStatus'].value_counts().to_dict()
+    moved = pd.DataFrame(changes, columns=["Username", "From", "To", "Reason"])
+    print(f"Status now: 0 = {counts.get(0, 0)}, 1 = {counts.get(1, 0)}, 2 = {counts.get(2, 0)}")
+    if not moved.empty:
+        print("Changes this run:")
+        print(moved.groupby(["From", "To", "Reason"]).size().to_string())
+
+    reports_dir = os.path.join(SCRIPT_DIR, 'reports')
+    os.makedirs(reports_dir, exist_ok=True)
+    changes_path = os.path.join(reports_dir, f"DeleteStatus_changes_{CURRENT_DATE.strftime('%Y_%m_%d')}{'_dryrun' if dry_run else ''}.csv")
+    moved.to_csv(changes_path, index=False)
+    print(f"Wrote {len(moved)} changes to {changes_path}")
+
+    max_fraction = float(getenv("MAX_NEW_FLAG_FRACTION") or 0.05)
+    newly_flagged = sum(1 for c in changes if c["From"] == 0 and c["To"] == 1)
+    if newly_flagged > max_fraction * unflagged_before:
+        raise RuntimeError(
+            f"Refusing to save: {newly_flagged} of {unflagged_before} unflagged members would be newly flagged, "
+            f"more than {max_fraction:.0%}. Check the EntraID lookup before trusting it. Nothing was written.")
+
+    if dry_run:
+        print("Dry run: DeleteStatus table NOT updated.")
+        return
 
     # Upload the updated delete status DataFrame back to the database
     delete_status_df.to_sql(DELETE_STATUS_TABLE_NAME, con=engine, if_exists='replace', index=False, dtype=deletestatus_sql_datatypes())
@@ -251,14 +266,14 @@ def Delete_Users(delete_status_df):
     print(f"Deleted {delete_count} users.")
 
 
-def main():
+def main(dry_run=False):
     entraid_table_name = collect_entraid_table_name()
 
-    delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME)
+    delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME, dry_run)
     entraid_status_df = pd.read_sql(text(f"SELECT * FROM AGOL_EntraID_Status"), engine)
 
     member_table_name, item_table_name = collect_table_names()
-    Calculate_Delete_Status(delete_status_df,entraid_status_df, get_empty_users(member_table_name, item_table_name))
+    Calculate_Delete_Status(delete_status_df, entraid_status_df, get_empty_users(member_table_name, item_table_name), dry_run)
     # Delete_Users(delete_status_df)
 
     
@@ -269,4 +284,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Recalculate DeleteStatus from the latest EntraID lookup.")
+    parser.add_argument("--dry-run", action="store_true", help="report changes without writing to the database")
+    main(dry_run=parser.parse_args().dry_run)
