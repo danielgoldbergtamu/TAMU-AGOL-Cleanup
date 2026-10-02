@@ -13,10 +13,12 @@
 #   Username, Email, Name, EmailsTried, EntraID_Status, ManagerEmail, ManagerDepartment,
 #   UserDepartment, WorkingEmail, Groups
 #
-# One deliberate difference: an alias (otherMails) lookup is made only for members who did not
+# Two deliberate differences. Groups are written in full: the PowerShell version cut them at 1,000
+# characters, which in the 30 July output cut 743 rows and could drop the affiliation group that
+# marks someone as current. And an alias (otherMails) lookup is made only for members who did not
 # match on userPrincipalName or mail. The PowerShell version also appended alias matches to
-# EmailsTried for members who had already matched. Status, department, supervisor and groups are
-# unaffected.
+# EmailsTried for members who had already matched; that one leaves status, department, supervisor and
+# groups unaffected.
 #
 # Every run also adds the supervisors it sees to the HIST_Supervisors table, because Entra stops
 # returning a supervisor once someone leaves (see CLAUDE.md). Turn that off with --no-history.
@@ -344,7 +346,7 @@ def main():
                 "WorkingEmail": used,
                 "ManagerEmail": (m_body.get("mail") or "") if m_status == 200 else "",
                 "ManagerDepartment": (m_body.get("department") or "") if m_status == 200 else "",
-                "Groups": ", ".join(g["id"] for g in groups)[:1000],
+                "Groups": ", ".join(g["id"] for g in groups),   # never cut: a dropped affiliation group reads as "departed"
             })
         rows.append(row)
 
