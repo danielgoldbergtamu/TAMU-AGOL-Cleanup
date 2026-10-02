@@ -6,6 +6,17 @@ Last Updated: April 2026
 
 Managed by Texas A&M GIS Help Desk: tx.ag/GISHelpDesk
 
+## Documentation
+
+- [docs/method.md](docs/method.md): the approach, the classes of content, and the process
+- [docs/usage-rules.md](docs/usage-rules.md): the rules users are shown
+- [docs/lessons.md](docs/lessons.md): what went wrong, or nearly did
+- [sql/](sql/): the selection queries, run against the catalog database (start with `00_setup.sql`)
+
+**This repository is public and holds no organization data.** Reports, lookups and results stay in
+the ignored `reports/` and `private/` folders. A pre-commit check enforces this: run
+`git config core.hooksPath .githooks` once after cloning.
+
 ## Background
 
 This repo represents current efforts to automate the process of managing Texas A&M's ArcGIS Online Enterprise. It includes scripts and configurables to crate a catalog of all users on Texas A&M's AGOL currently and previously. Cataloging, management and quering of users is done using a MS SQL Server Database hosted locally on the device running the scripts.
