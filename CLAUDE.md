@@ -35,6 +35,21 @@ These come from the project's experience and are not optional:
    does not carry over to the next.
 6. **Snapshots go stale.** Re-derive candidates from a fresh export before any live run.
 
+## Supervisors are captured while they still can be
+
+**Before a departed person's content is removed, their supervisor is the one told to collect
+it.** Entra returns a department for faculty and staff, and a supervisor (manager) for every
+employee, student employees included. **It stops returning them once the person leaves.** So:
+
+- The identity lookup runs on **every** snapshot, not only when a cleanup is due.
+- Every supervisor ever seen for a person is **kept in a history table and never overwritten by
+  a blank**. The most recent non-empty supervisor is the one notified.
+- Old lookups (earlier status exports, run files, SQL Server history tables) are merged into that
+  history, not discarded. For many people who have already left, they are the only record.
+- Check that the supervisor is still at the university before notifying them.
+- Students with no supervisor fall back to their department or college. TAMU's MQS endpoint
+  returns classification, major and college.
+
 ## Toolchain direction
 
 The target is **Python only**. The ArcGIS API for Python handles exports and deletes, Microsoft
