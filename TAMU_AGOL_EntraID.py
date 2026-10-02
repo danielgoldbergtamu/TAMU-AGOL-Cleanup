@@ -98,11 +98,18 @@ class GraphAuth:
             "client_id": self.client_id, "response_type": "code", "redirect_uri": redirect_uri,
             "scope": SCOPES, "state": state, "code_challenge": challenge,
             "code_challenge_method": "S256", "prompt": "select_account"})
-        print("Opening a browser for Microsoft sign-in. If nothing opens, visit:\n" + url)
+        print("Opening a browser for Microsoft sign-in (waiting up to 15 minutes). If nothing opens, visit:\n" + url,
+              flush=True)
         webbrowser.open(url)
-        server.timeout = 300
-        server.handle_request()
+        # Keep answering requests until the sign-in result arrives: a browser may send a favicon or
+        # pre-connect request first, and a single handle_request() would give up on that.
+        deadline = time.time() + 900
+        server.timeout = 30
+        while "code" not in received and "error" not in received and time.time() < deadline:
+            server.handle_request()
         server.server_close()
+        if "code" not in received and "error" not in received:
+            raise RuntimeError("Sign-in was not completed within 15 minutes.")
 
         if received.get("state", [""])[0] != state or "code" not in received:
             raise RuntimeError(f"Sign-in failed: {received.get('error_description', received.get('error', ['no code returned']))[0]}")
