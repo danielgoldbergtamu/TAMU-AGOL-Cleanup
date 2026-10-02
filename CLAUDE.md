@@ -47,8 +47,11 @@ employee, student employees included. **It stops returning them once the person 
 - Old lookups (earlier status exports, run files, SQL Server history tables) are merged into that
   history, not discarded. For many people who have already left, they are the only record.
 - Check that the supervisor is still at the university before notifying them.
-- Students with no supervisor fall back to their department or college. TAMU's MQS endpoint
-  returns classification, major and college.
+- **Students with no supervisor have no fallback contact.** Students are emailed at the end of
+  each semester to collect their own data, and that notice is their warning. Don't invent a
+  department or instructor contact for them.
+- The merged history lives in SQL Server as `HIST_Supervisors`, built by
+  `tools/build_supervisor_history.py` from every earlier lookup.
 
 ## Toolchain direction
 
