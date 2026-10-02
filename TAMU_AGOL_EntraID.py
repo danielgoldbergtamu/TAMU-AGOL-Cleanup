@@ -11,7 +11,7 @@
 # Output columns are identical to the PowerShell version (reports/AGOL_EntraID_Status.csv), so
 # TAMU_AGOL_Catalog.py and TAMU_AGOL_DeleteStatus.py read it unchanged:
 #   Username, Email, Name, EmailsTried, EntraID_Status, ManagerEmail, ManagerDepartment,
-#   UserDepartment, WorkingEmail, Groups
+#   UserDepartment, WorkingEmail, Groups, updated_date
 #
 # Two deliberate differences. Groups are written in full: the PowerShell version cut them at 1,000
 # characters, which in the 30 July output cut 743 rows and could drop the affiliation group that
@@ -59,7 +59,7 @@ SCOPES = "https://graph.microsoft.com/User.Read.All offline_access"   # what Con
 BATCH_SIZE = 20                       # Graph's limit per $batch request
 USER_FIELDS = "id,userPrincipalName,mail,department,displayName"
 OUTPUT_COLUMNS = ["Username", "Email", "Name", "EmailsTried", "EntraID_Status", "ManagerEmail",
-                  "ManagerDepartment", "UserDepartment", "WorkingEmail", "Groups"]
+                  "ManagerDepartment", "UserDepartment", "WorkingEmail", "Groups", "updated_date"]
 
 
 # Sign-in: authorization code with PKCE and a localhost redirect, the same browser flow
@@ -335,7 +335,8 @@ def main():
         emails = tried[i]
         row = {"Username": member.get("Username", ""), "Email": member.get("Email", ""), "Name": member.get("Name", ""),
                "EmailsTried": ", ".join(emails)[:500], "EntraID_Status": 0, "ManagerEmail": "",
-               "ManagerDepartment": "", "UserDepartment": "", "WorkingEmail": "", "Groups": ""}
+               "ManagerDepartment": "", "UserDepartment": "", "WorkingEmail": "", "Groups": "",
+               "updated_date": run_date.isoformat()}
         if i in found:
             user, used = found[i]
             m_status, m_body = extra.get(f"m{user['id']}", (404, {}))

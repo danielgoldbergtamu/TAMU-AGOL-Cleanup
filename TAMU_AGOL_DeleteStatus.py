@@ -266,7 +266,29 @@ def Delete_Users(delete_status_df):
     print(f"Deleted {delete_count} users.")
 
 
+def Archive_DeleteStatus():
+    """Copies the current DeleteStatus table into HIST_DeleteStatus, stamped with today's date, before
+    this run replaces it. Until 2 October 2026 every run overwrote the table with no copy kept, so a
+    run on a bad lookup could not be undone or even seen afterwards."""
+    with engine.begin() as connection:
+        if connection.execute(text(f"SELECT OBJECT_ID('{DELETE_STATUS_TABLE_NAME}')")).scalar() is None:
+            return
+        columns = [r[0] for r in connection.execute(text(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = :t ORDER BY ORDINAL_POSITION"),
+            {"t": DELETE_STATUS_TABLE_NAME})]
+        column_sql = ", ".join(f"[{c}]" for c in columns)
+        if connection.execute(text("SELECT OBJECT_ID('HIST_DeleteStatus')")).scalar() is None:
+            connection.execute(text(f"SELECT {column_sql}, CAST(GETDATE() AS DATE) AS archived_date "
+                                    f"INTO HIST_DeleteStatus FROM {DELETE_STATUS_TABLE_NAME}"))
+        else:
+            connection.execute(text(f"INSERT INTO HIST_DeleteStatus ({column_sql}, archived_date) "
+                                    f"SELECT {column_sql}, CAST(GETDATE() AS DATE) FROM {DELETE_STATUS_TABLE_NAME}"))
+    print("Archived the current DeleteStatus table to HIST_DeleteStatus.")
+
+
 def main(dry_run=False):
+    if not dry_run:
+        Archive_DeleteStatus()
     entraid_table_name = collect_entraid_table_name()
 
     delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME, dry_run)

@@ -14,6 +14,8 @@ from os import getenv
 from urllib.parse import quote_plus
 
 import subprocess
+import shutil
+import sys
 
 import datetime
 import os
@@ -264,13 +266,20 @@ def fetch_reports():
     """Fetches reports from ArcGIS Online, saves them as CSV's, and returns them as a pandas DataFrame."""
     print("fetching AGOL item and member reports...")
 
-    # Get all org item & member reports. These are generated daily by 
-    items = gis.content.search('title:"OrganizationItems_"', max_items=100)
-    members = gis.content.search('title:"OrganizationMembers_"', max_items=100)
+    # Get the newest org item & member reports, generated on a schedule by AGOL. Sort on the server:
+    # the search used to fetch 100 results in no fixed order and pick the newest of those, and with
+    # more than 100 reports in the org it picked the 29 September report on 2 October.
+    items = gis.content.search('title:"OrganizationItems_"', max_items=5, sort_field='created', sort_order='desc')
+    members = gis.content.search('title:"OrganizationMembers_"', max_items=5, sort_field='created', sort_order='desc')
+    if not items or not members:
+        raise RuntimeError("No OrganizationItems_ or OrganizationMembers_ report found in AGOL.")
 
-    # Assume first result is the most recent report (the one you want)
     item_report = sorted(items, key=lambda x: x.created, reverse=True)[0]
     member_report = sorted(members, key=lambda x: x.created, reverse=True)[0]
+    for report in (item_report, member_report):
+        age_days = (datetime.datetime.now() - datetime.datetime.fromtimestamp(report.created / 1000)).days
+        if age_days > 7:
+            print(f"WARNING: newest {report.title} is {age_days} days old. Check the scheduled report in AGOL.")
 
     print(f'found item report: {item_report.title} created on {item_report.created}'
           f'\nfound member report: {member_report.title} created on {member_report.created}')
@@ -306,18 +315,20 @@ def fetch_reports():
 
 
 def Collect_EntraID_Information(member_report_csv_path):
-    """Calls TAMU_AGOL_EntraID.ps1 to collect EntraID information for each user in the member report and write to a CSV."""
+    """Runs TAMU_AGOL_EntraID.py to look up each member of the member report in Entra ID and write
+    reports/AGOL_EntraID_Status.csv. It replaced TAMU_AGOL_EntraID.ps1 on 2 October 2026: same output,
+    minutes instead of hours, and without the PowerShell version's alias and 1,000-character group
+    bugs. It opens a browser for Microsoft sign-in."""
 
     member_report_csv_path = os.path.abspath(os.path.join(SCRIPT_DIR, member_report_csv_path))
 
-    # Run the PowerShell script to collect EntraID information for each user in the member report and write to CSV
     result = subprocess.Popen(
     [
-    'powershell', 
-    '-ExecutionPolicy', 'Bypass',
-    '-File', os.path.join(SCRIPT_DIR, 'TAMU_AGOL_EntraID.ps1'),
-    '-input_csv_path', member_report_csv_path,
-    ], 
+    sys.executable, '-u',
+    os.path.join(SCRIPT_DIR, 'TAMU_AGOL_EntraID.py'),
+    '--input_csv_path', member_report_csv_path,
+    '--output_csv_path', os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv'),
+    ],
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
     text=True
@@ -336,7 +347,7 @@ def Collect_EntraID_Information(member_report_csv_path):
         print(f"Errors: {stderr_output}")
 
     if result.returncode != 0:
-        raise RuntimeError("PowerShell EntraID collection failed; see errors above.")
+        raise RuntimeError("EntraID lookup failed; see errors above. The database has not been changed.")
 
     entraid_status_path = os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv')
     if not os.path.exists(entraid_status_path):
@@ -372,7 +383,7 @@ def Upload_Tables_to_Database(item_report_df, member_report_df, entraid_status_p
     entraid_status_df.to_sql('AGOL_EntraID_Status', engine, if_exists='replace', index=False, dtype=entraid_dtypes)
 
 def Catalog_and_Cleanup():
-    "Adds data from previous reports to history tables and deletes old reports from the database."
+    "Adds data from previous report tables to the history tables, then drops the previous report tables. Files are archived separately by Archive_Reports_Directory()."
     print("cataloging and clearing previous reports...")
 
     # Collect names of previous reports from the database
@@ -448,22 +459,36 @@ def Catalog_and_Cleanup():
         else:
             print("No previous entraID status reports found in the database.")
 
-    # clear reports directory
-    print("clearing reports directory...")
-    for filename in os.listdir(os.path.join(SCRIPT_DIR, 'reports')):
-        if filename.lower().endswith('.md'):
+
+
+def Archive_Reports_Directory():
+    """Moves the previous run's files out of reports/ into reports/archive/<date_time>/ so each run
+    starts clean. Nothing is deleted. Until 2 October 2026 this step deleted every file in reports/,
+    which on its first run that day took a 7-minute lookup and the July Entra status with it."""
+    reports_dir = os.path.join(SCRIPT_DIR, 'reports')
+    os.makedirs(reports_dir, exist_ok=True)
+    archive_dir = os.path.join(reports_dir, 'archive', datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S'))
+    moved = 0
+    for filename in os.listdir(reports_dir):
+        file_path = os.path.join(reports_dir, filename)
+        if filename.lower().endswith('.md') or not os.path.isfile(file_path):
             continue
-        file_path = os.path.join(SCRIPT_DIR, 'reports', filename)
+        os.makedirs(archive_dir, exist_ok=True)
         try:
-            if os.path.isfile(file_path):
-                os.unlink(file_path)
-        except Exception as e:
-            print(f"Error deleting file {file_path}: {e}")
+            shutil.move(file_path, os.path.join(archive_dir, filename))
+            moved += 1
+        except OSError as e:  # a file another process still has open, such as a running log
+            print(f"Left in place (in use): {filename} ({e})")
+    print(f"Archived {moved} previous report files to {archive_dir}" if moved else "No previous report files to archive.")
 
 def main():
-    Catalog_and_Cleanup()
+    # Order matters (fixed 2 October 2026): everything new is fetched and looked up FIRST, and the
+    # database is touched only once it all exists. The old order dropped the previous tables before
+    # the lookup, so a failed lookup left the database with no EntraID status at all.
+    Archive_Reports_Directory()
     item_report_df, member_report_df, item_report_csv_path, member_report_csv_path, item_report_title, member_report_title = fetch_reports()
     Collect_EntraID_Information(member_report_csv_path)
+    Catalog_and_Cleanup()
     Upload_Tables_to_Database(
         item_report_df,
         member_report_df,
