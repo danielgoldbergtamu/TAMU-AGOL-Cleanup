@@ -23,7 +23,7 @@ FIXTURE_DIRS = ("tests/fixtures/",)
 
 PATTERNS = {
     "email address": re.compile(r"\b[A-Za-z0-9._%+-]+@(?!example\.(?:com|org|edu)\b)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b"),
-    "AGOL username": re.compile(r"\b[A-Za-z0-9._-]+@[A-Za-z0-9.-]+_[A-Za-z0-9]+\b"),
+    "AGOL username": re.compile(r"\b[A-Za-z0-9._-]+@(?!example\.(?:com|org|edu)_)[A-Za-z0-9.-]+_[A-Za-z0-9]+\b"),
     "item ID": re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{32}(?![0-9a-fA-F])"),
 }
 
