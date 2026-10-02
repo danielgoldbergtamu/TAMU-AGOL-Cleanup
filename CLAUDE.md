@@ -68,5 +68,7 @@ Run Python with ArcGIS Pro's interpreter (`arcgispro-py3`), which has `arcgis`. 
 
 ## Git
 
-Commit freely with a message that says why. **Pushing is the maintainer's**: hand over the push
-command and don't run it.
+Commit freely with a message that says why, then **push both repositories yourself** (Dan,
+2 October 2026: he wants commits and pushes done for him, not handed over). Before every push of
+this public repository, run `python tools/leak_check.py --all` and stop if it fails. Never
+force-push, and never push with the hook bypassed.
