@@ -13,6 +13,8 @@ from sqlalchemy import text
 from dotenv import load_dotenv
 import datetime
 import os
+
+from TAMU_AGOL_Runs import Run
 from os import getenv
 
 # Load environment variables FIRST, before accessing any getenv() calls
@@ -92,20 +94,20 @@ def get_users_tagged_for_deletion():
 
 
 def main():
-    member_table_name, item_table_name = collect_table_names()
-    users_tagged_for_deletion = get_users_tagged_for_deletion()
+    with Run(engine, 'deleteusers') as run:
+        member_table_name, item_table_name = collect_table_names()
+        users_tagged_for_deletion = get_users_tagged_for_deletion()
 
-    # Combine the two lists and remove duplicates
-    users_to_delete = set(users_tagged_for_deletion)
+        # Combine the two lists and remove duplicates
+        users_to_delete = set(users_tagged_for_deletion)
 
-    reports_dir = os.path.join(SCRIPT_DIR, 'reports')
-    
-    users_to_delete_df = pd.DataFrame(sorted(users_to_delete), columns=['Username'])
-    users_to_delete_csv = os.path.join(reports_dir, f'UsersToDelete_{CURRENT_DATE.strftime("%Y_%m_%d")}.csv')
-    users_to_delete_df.to_csv(users_to_delete_csv, index=False)
+        users_to_delete_df = pd.DataFrame(sorted(users_to_delete), columns=['Username'])
+        users_to_delete_csv = run.path('UsersToDelete.csv')   # this run's folder: never overwrites an earlier list
+        users_to_delete_df.to_csv(users_to_delete_csv, index=False)
+        run.note(users_to_delete=len(users_to_delete))
 
-    print(f'Found {len(users_to_delete)} users to delete.')
-    print(f'Saved users-to-delete list to {users_to_delete_csv}')
+        print(f'Found {len(users_to_delete)} users to delete.')
+        print(f'Saved users-to-delete list to {users_to_delete_csv}')
 
 
 

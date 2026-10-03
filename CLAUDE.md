@@ -53,6 +53,20 @@ employee, student employees included. **It stops returning them once the person 
 - The merged history lives in SQL Server as `HIST_Supervisors`, built by
   `tools/build_supervisor_history.py` from every earlier lookup.
 
+## Nothing from an earlier run is deleted
+
+Dan, 2 October 2026: "we do not delete prior runs or data when we initiate new runs."
+
+- Every run is recorded in the `RUNS` table and writes only into its own folder, `reports/runs/<run id>/`
+  (`TAMU_AGOL_Runs.Run`). Pipeline steps share the pipeline's id through `AGOL_RUN_ID`.
+- History tables (`HIST_OrganizationMembers`, `HIST_OrganizationItems`, `HIST_EntraID_Status`) are
+  append-only. Each row has a fingerprint (`row_hash`) and `first_seen` / `last_seen`. A new snapshot
+  extends unchanged rows and adds new or changed ones (`merge_snapshot_into_history`). **Never add a query
+  that deletes history rows.**
+- `DeleteStatus` is copied to `HIST_DeleteStatus` with the run id before every real run.
+- `tools/backfill_history.py` rebuilt first-seen dates from the March and April snapshots on 3 October
+  2026. Run it only before the history gains new columns, and only after a backup.
+
 ## Toolchain direction
 
 The target is **Python only**. The ArcGIS API for Python handles exports and deletes, Microsoft

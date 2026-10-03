@@ -284,7 +284,8 @@ def main():
     load_dotenv(os.path.join(SCRIPT_DIR, ".env"), override=True)
     parser = argparse.ArgumentParser(description="Look up AGOL members in Entra ID.")
     parser.add_argument("--input_csv_path", required=True, help="AGOL member report (Username, Email, Name)")
-    parser.add_argument("--output_csv_path", default=os.path.join(SCRIPT_DIR, "reports", "AGOL_EntraID_Status.csv"))
+    parser.add_argument("--output_csv_path", default=os.path.join(SCRIPT_DIR, "reports", f"AGOL_EntraID_Status_{time.strftime('%Y%m%d-%H%M%S')}.csv"),
+                        help="defaults to a new timestamped file, so a standalone run never overwrites an earlier one")
     parser.add_argument("--limit", type=int, default=0, help="only the first N members (for testing)")
     parser.add_argument("--workers", type=int, default=4, help="batches in flight at once")
     parser.add_argument("--no-history", action="store_true", help="do not update HIST_Supervisors")

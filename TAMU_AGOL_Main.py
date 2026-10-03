@@ -9,24 +9,38 @@
 # Author: Dalton Peterson
 # Date: 2026-04-21
 
-from TAMU_AGOL_Catalog import main as catalog_main
+import os
+
+from TAMU_AGOL_Catalog import main as catalog_main, engine
+from TAMU_AGOL_Runs import Run
 from TAMU_AGOL_DeleteStatus import main as delete_status_main
 from TAMU_AGOL_DeleteUsers import main as delete_users_main
 from TAMU_AGOL_UserQuotas import main as user_quotas_main
 
 def main():
+    # One pipeline run; each step below records its own run under it and writes into a sub-folder of
+    # reports/runs/<pipeline run id>/ (TAMU_AGOL_Runs reads AGOL_RUN_ID).
     print("Starting ArcGIS Online cleanup process...")
+    with Run(engine, 'pipeline') as pipeline:
+        os.environ['AGOL_RUN_ID'] = pipeline.run_id
+        try:
+            run_steps()
+        finally:
+            os.environ.pop('AGOL_RUN_ID', None)
+
+
+def run_steps():
     
     print("\nStep 1: Accessing AGOL Catalog and Gathering User Data...")
     catalog_main()
     
-    print("\nStep 2: Checking Account Deletion Status and Emailing Users...")
+    print("\nStep 2: Recalculating delete status (no email is sent)...")
     delete_status_main()
-    
-    print("\nStep 3: Deleting Accounts Marked for Deletion...")
+
+    print("\nStep 3: Listing accounts marked for deletion (nothing is deleted)...")
     delete_users_main()
-    
-    print("\nStep 4: Calculating User Storage Quotas and Emailing Over-Quota Users...")
+
+    print("\nStep 4: Listing users over the storage quota (no email is sent)...")
     user_quotas_main()
     
     print("\nArcGIS Online cleanup process completed.")

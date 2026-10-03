@@ -17,8 +17,11 @@ import subprocess
 import shutil
 import sys
 
+import argparse
 import datetime
 import os
+
+from TAMU_AGOL_Runs import Run, merge_snapshot_into_history
 
 
 # GLOBAL VARIABLES & INITIALIZATION
@@ -29,91 +32,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
 
 
-# Duplicate row SQL queries: these are used to remove rows that are duplicated in the history tables but have no updated
-# attributes. When table schema is changed, these queries will need to be updated to reflect the new columns. 
-# The queries keep the most recent record and delete the older duplicates.
-
-
-ITEM_HIST_DUPLICATE_QUERY = """
-WITH CTE AS (
-    SELECT *,
-        ROW_NUMBER() OVER (
-            PARTITION BY [Item ID]
-                        ,[Item Url]
-                        ,[Item Type]
-                        ,[Date Created]
-                        ,[Date Modified]
-                        ,[Content Category]
-                        ,[View Counts]
-                        ,[Owner]
-                        ,[File Storage Size]
-                        ,[Feature Storage Size]
-                        ,[Share Level]
-                        ,[# of Groups shared with]
-                        ,[Tags]
-                        ,[Number of Comments]
-                        ,[Is Hosted Service]
-                        ,[Date Last Viewed]
-                        ,[In Recycle Bin]
-            ORDER BY [updated_date] DESC
-        ) AS rn
-    FROM dbo.HIST_OrganizationItems
-)
-DELETE FROM CTE WHERE rn > 1;
-"""
-
-MEMBER_HIST_DUPLICATE_QUERY = """
-WITH CTE AS (
-    SELECT *,
-        ROW_NUMBER() OVER (
-            PARTITION BY [Username]
-      			,[Name]
-      			,[Email]
-      			,[Profile Visibility]
-      			,[My Esri Access]
-      			,[User Type]
-      			,[Role]
-      			,[Available Credits]
-      			,[Assigned Credits]
-      			,[Last Login Date]
-      			,[Date Created]
-      			,[Add-On Apps]
-      			,[# of Items Owned]
-      			,[# of Groups Owned]
-      			,[# of Groups Total]
-      			,[Login Type]
-      			,[Member Account Status]
-      			,[Verified Email Status]
-      			,[Multifactor Authentication Exempt]
-      			,[Member Categories]
-      			,[Multifactor Authentication]
-            ORDER BY [updated_date] DESC
-        ) AS rn
-    FROM dbo.HIST_OrganizationMembers
-)
-DELETE FROM CTE WHERE rn > 1;
-"""
-
-ENTRAID_HIST_DUPLICATE_QUERY = """
-WITH CTE AS (
-    SELECT *,
-        ROW_NUMBER() OVER (
-            PARTITION BY [Username]
-      			,[Email]
-      			,[Name]
-      			,[EntraID_Status]
-      			,[ManagerEmail]
-      			,[Groups]
-      			,[WorkingEmail]
-      			,[EmailsTried]
-      			,[UserDepartment]
-      			,[ManagerDepartment]
-            ORDER BY [updated_date] DESC
-        ) AS rn
-    FROM dbo.HIST_EntraID_Status
-)
-DELETE FROM CTE WHERE rn > 1;
-"""
+# History is append-only (TAMU_AGOL_Runs.merge_snapshot_into_history). The duplicate-removal queries
+# that used to live here deleted every history row identical to a newer one; removed 3 October 2026.
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=ENV_PATH, override=True)
@@ -262,7 +182,7 @@ def preprocess_dataframe_for_sql(df, dtype_map):
 
 # MAIN FUNCTIONS
 
-def fetch_reports():
+def fetch_reports(out_dir):
     """Fetches reports from ArcGIS Online, saves them as CSV's, and returns them as a pandas DataFrame."""
     print("fetching AGOL item and member reports...")
 
@@ -314,9 +234,9 @@ def fetch_reports():
     )
 
 
-def Collect_EntraID_Information(member_report_csv_path):
+def Collect_EntraID_Information(member_report_csv_path, entraid_status_path):
     """Runs TAMU_AGOL_EntraID.py to look up each member of the member report in Entra ID and write
-    reports/AGOL_EntraID_Status.csv. It replaced TAMU_AGOL_EntraID.ps1 on 2 October 2026: same output,
+    AGOL_EntraID_Status.csv into the run's folder. It replaced TAMU_AGOL_EntraID.ps1 on 2 October 2026: same output,
     minutes instead of hours, and without the PowerShell version's alias and 1,000-character group
     bugs. It opens a browser for Microsoft sign-in."""
 
@@ -327,29 +247,21 @@ def Collect_EntraID_Information(member_report_csv_path):
     sys.executable, '-u',
     os.path.join(SCRIPT_DIR, 'TAMU_AGOL_EntraID.py'),
     '--input_csv_path', member_report_csv_path,
-    '--output_csv_path', os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv'),
+    '--output_csv_path', entraid_status_path,
     ],
     stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
+    stderr=subprocess.STDOUT,   # one stream, so a chatty error output can never block the pipe
     text=True
     )
 
-    output_lines = []
     for line in result.stdout:
         print(line, end='')  # Print to terminal in real-time
-        output_lines.append(line)
 
     result.wait()
-    stderr_output = result.stderr.read() if result.stderr else ""
-
-    # Now you have both
-    if stderr_output:
-        print(f"Errors: {stderr_output}")
 
     if result.returncode != 0:
         raise RuntimeError("EntraID lookup failed; see errors above. The database has not been changed.")
 
-    entraid_status_path = os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv')
     if not os.path.exists(entraid_status_path):
         raise FileNotFoundError(f"Expected EntraID status report was not created: {entraid_status_path}")
     
@@ -382,84 +294,22 @@ def Upload_Tables_to_Database(item_report_df, member_report_df, entraid_status_p
     entraid_status_df = preprocess_dataframe_for_sql(entraid_status_df, entraid_dtypes)
     entraid_status_df.to_sql('AGOL_EntraID_Status', engine, if_exists='replace', index=False, dtype=entraid_dtypes)
 
-def Catalog_and_Cleanup():
-    "Adds data from previous report tables to the history tables, then drops the previous report tables. Files are archived separately by Archive_Reports_Directory()."
-    print("cataloging and clearing previous reports...")
-
-    # Collect names of previous reports from the database
-    with engine.connect() as connection:
-        cursor_item = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'OrganizationItems_%'"))
-        previous_item_reports = cursor_item.fetchall()
-        
-        cursor_member = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'OrganizationMembers_%'"))
-        previous_member_reports = cursor_member.fetchall()
-        
-        cursor_entraid = connection.execute(text("SELECT name FROM sys.tables WHERE name = 'AGOL_EntraID_Status'"))
-        previous_entraid_status = cursor_entraid.fetchall()
-
-    item_history_table_title = 'HIST_OrganizationItems'
-    member_history_table_title = 'HIST_OrganizationMembers'
-    entraid_status_history_table_title = 'HIST_EntraID_Status'
-
-    # Add previous reports to history tables and delete if they exist
-    print("adding tables to history tables and clearing previous reports...")
-    
-    with engine.connect() as connection:
-        # For item reports
-        if previous_item_reports:
-            for row in previous_item_reports:
-                table_name = row[0]  # Assuming name is the first column
-                # Check if history table exists, if not, create it
-                check_result = connection.execute(text(f"SELECT OBJECT_ID('{item_history_table_title}')"))
-                exists = check_result.fetchone()
-                if exists[0] is None:
-                    connection.execute(text(f"SELECT * INTO [{item_history_table_title}] FROM [{table_name}]"))
-                else:
-                    print(f"Updating history table with data from {table_name} by matching columns...")
-                    insert_by_matching_columns(connection, item_history_table_title, table_name)
-                    print(f"Removing duplicate rows from {item_history_table_title}...")
-                    connection.execute(text(ITEM_HIST_DUPLICATE_QUERY))
-                connection.execute(text(f"DROP TABLE [{table_name}]"))
-                connection.commit()  # Commit after each operation
-        else:
-            print("No previous item reports found in the database.")
-        
-        # For member reports
-        if previous_member_reports:
-            for row in previous_member_reports:
-                table_name = row[0]
-                check_result = connection.execute(text(f"SELECT OBJECT_ID('{member_history_table_title}')"))
-                exists = check_result.fetchone()
-                if exists[0] is None:
-                    connection.execute(text(f"SELECT * INTO [{member_history_table_title}] FROM [{table_name}]"))
-                else:
-                    print(f"Updating history table with data from {table_name} by matching columns...")
-                    insert_by_matching_columns(connection, member_history_table_title, table_name)
-                    print(f"Removing duplicate rows from {member_history_table_title}...")
-                    connection.execute(text(MEMBER_HIST_DUPLICATE_QUERY))
-                connection.execute(text(f"DROP TABLE [{table_name}]"))
-                connection.commit()
-        else:
-            print("No previous member reports found in the database.")   
-        
-        # For EntraID status
-        if previous_entraid_status:
-            table_name = previous_entraid_status[0][0]
-            check_result = connection.execute(text(f"SELECT OBJECT_ID('{entraid_status_history_table_title}')"))
-            exists = check_result.fetchone()
-            if exists[0] is None:
-                connection.execute(text(f"SELECT * INTO [{entraid_status_history_table_title}] FROM [{table_name}]"))
-            else:
-                print(f"Updating history table with data from {table_name} by matching columns...")
-                insert_by_matching_columns(connection, entraid_status_history_table_title, table_name)
-                print(f"Removing duplicate rows from {entraid_status_history_table_title}...")
-                connection.execute(text(ENTRAID_HIST_DUPLICATE_QUERY))
-            connection.execute(text(f"DROP TABLE [{table_name}]"))
-            connection.commit()
-        else:
-            print("No previous entraID status reports found in the database.")
-
-
+def Catalog_and_Cleanup(run):
+    """Merges the previous run's report tables into their history tables, then drops the dated tables.
+    Nothing is lost: every row is in the history with the dates it was seen, and the run folder that
+    loaded each table still holds its CSV. History is append-only since 3 October 2026."""
+    print("merging previous report tables into history...")
+    pairs = [("OrganizationItems[_]20%", "HIST_OrganizationItems"),
+             ("OrganizationMembers[_]20%", "HIST_OrganizationMembers"),
+             ("AGOL[_]EntraID[_]Status", "HIST_EntraID_Status")]
+    with engine.begin() as connection:
+        for pattern, history_table in pairs:
+            tables = [r[0] for r in connection.execute(text(f"SELECT name FROM sys.tables WHERE name LIKE '{pattern}' ORDER BY name")).fetchall()]
+            for table_name in tables:
+                seen = connection.execute(text(f"SELECT CAST(MAX(updated_date) AS DATE) FROM dbo.[{table_name}]")).scalar() or CURRENT_DATE
+                extended, added = merge_snapshot_into_history(connection, history_table, table_name, run.run_id, seen)
+                run.note(**{f"history_{table_name}": {"history": history_table, "seen": str(seen), "extended": extended, "added": added}})
+                connection.execute(text(f"DROP TABLE dbo.[{table_name}]"))
 
 def Archive_Reports_Directory():
     """Moves the previous run's files out of reports/ into reports/archive/<date_time>/ so each run
@@ -481,23 +331,26 @@ def Archive_Reports_Directory():
             print(f"Left in place (in use): {filename} ({e})")
     print(f"Archived {moved} previous report files to {archive_dir}" if moved else "No previous report files to archive.")
 
-def main():
-    # Order matters (fixed 2 October 2026): everything new is fetched and looked up FIRST, and the
-    # database is touched only once it all exists. The old order dropped the previous tables before
-    # the lookup, so a failed lookup left the database with no EntraID status at all.
-    Archive_Reports_Directory()
-    item_report_df, member_report_df, item_report_csv_path, member_report_csv_path, item_report_title, member_report_title = fetch_reports()
-    Collect_EntraID_Information(member_report_csv_path)
-    Catalog_and_Cleanup()
-    Upload_Tables_to_Database(
-        item_report_df,
-        member_report_df,
-        os.path.join(SCRIPT_DIR, 'reports', 'AGOL_EntraID_Status.csv'),
-        item_report_title,
-        member_report_title,
-    )
-
-    print("Catalog script execution complete.")    
+def main(entraid_csv=None):
+    """One catalog run. Order matters (2 October 2026): everything new is fetched and looked up FIRST, and
+    the database is touched only once it all exists. With entraid_csv, an Entra lookup already made
+    (TAMU_AGOL_EntraID.py run on its own, with its sign-in) is used instead of starting a new one."""
+    with Run(engine, 'catalog') as run:
+        Archive_Reports_Directory()
+        item_report_df, member_report_df, item_report_csv_path, member_report_csv_path, item_report_title, member_report_title = fetch_reports(run.dir)
+        run.note(item_report=item_report_title, member_report=member_report_title,
+                 items=len(item_report_df), members=len(member_report_df))
+        entraid_status_path = run.path('AGOL_EntraID_Status.csv')
+        if entraid_csv:
+            shutil.copy2(entraid_csv, entraid_status_path)
+            run.note(entraid_source=f"supplied: {entraid_csv}")
+            print(f"using the supplied EntraID lookup {entraid_csv} (copied into the run folder)")
+        else:
+            Collect_EntraID_Information(member_report_csv_path, entraid_status_path)
+            run.note(entraid_source="looked up in this run")
+        Catalog_and_Cleanup(run)
+        Upload_Tables_to_Database(item_report_df, member_report_df, entraid_status_path, item_report_title, member_report_title)
+        print("Catalog script execution complete.")
 
 
 # EXECUTION
@@ -505,7 +358,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Fetch the newest AGOL reports, look members up in Entra, and load the database.")
+    parser.add_argument("--entraid-csv", help="use this Entra lookup file instead of running a new lookup")
+    main(entraid_csv=parser.parse_args().entraid_csv)
 
 
 

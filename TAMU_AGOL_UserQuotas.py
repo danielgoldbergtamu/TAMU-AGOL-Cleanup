@@ -117,14 +117,16 @@ def calculate_user_storage_quota(member_table_name, item_table_name):
 
 
 def main():
-    member_table_name, item_table_name = collect_table_names()
-    over_quota_users = calculate_user_storage_quota(member_table_name, item_table_name)
+    from TAMU_AGOL_Runs import Run
+    with Run(engine, 'userquotas') as run:
+        member_table_name, item_table_name = collect_table_names()
+        over_quota_users = calculate_user_storage_quota(member_table_name, item_table_name)
 
-    reports_dir = os.path.join(SCRIPT_DIR, 'reports')
-    print(f"Saving report to {reports_dir}")
-    over_quota_df = over_quota_users.sort_values(by='total_feature_storage_mb', ascending=False)
-    over_quota_csv = os.path.join(reports_dir, f'UsersOverQuota_{CURRENT_DATE.strftime("%Y_%m_%d")}.csv')
-    over_quota_df.to_csv(over_quota_csv, index=False)
+        over_quota_df = over_quota_users.sort_values(by='total_feature_storage_mb', ascending=False)
+        over_quota_csv = run.path('UsersOverQuota.csv')   # this run's folder: never overwrites an earlier list
+        over_quota_df.to_csv(over_quota_csv, index=False)
+        run.note(users_over_quota=len(over_quota_df))
+        print(f"Saved over-quota report to {over_quota_csv}")
 
     # email_over_quota_users(over_quota_users)
 

@@ -24,6 +24,7 @@ from os import getenv
 from dotenv import load_dotenv
 
 from TAMU_AGOL_UserQuotas import collect_table_names
+from TAMU_AGOL_Runs import Run
 
 
 # GLOBAL VARIABLES & INITIALIZATION
@@ -155,7 +156,7 @@ def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name, dry_
 
 
 
-def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dry_run=False):
+def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dry_run=False, run=None):
     """Recalculates every member's DeleteStatus from the latest EntraID lookup and writes it back.
 
     Rules, applied to every member on every run (2 October 2026 rewrite, register AGOL-024):
@@ -228,9 +229,14 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
         print("Changes this run:")
         print(moved.groupby(["From", "To", "Reason"]).size().to_string())
 
-    reports_dir = os.path.join(SCRIPT_DIR, 'reports')
-    os.makedirs(reports_dir, exist_ok=True)
-    changes_path = os.path.join(reports_dir, f"DeleteStatus_changes_{CURRENT_DATE.strftime('%Y_%m_%d')}{'_dryrun' if dry_run else ''}.csv")
+    if run is not None:
+        changes_path = run.path("DeleteStatus_changes.csv")
+        run.note(changes=len(moved), status_counts={str(k): int(v) for k, v in counts.items()},
+                 changes_by_reason={f"{f}->{t} {r}": int(n) for (f, t, r), n in moved.groupby(["From", "To", "Reason"]).size().items()} if not moved.empty else {})
+    else:
+        reports_dir = os.path.join(SCRIPT_DIR, 'reports')
+        os.makedirs(reports_dir, exist_ok=True)
+        changes_path = os.path.join(reports_dir, f"DeleteStatus_changes_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}{'_dryrun' if dry_run else ''}.csv")
     moved.to_csv(changes_path, index=False)
     print(f"Wrote {len(moved)} changes to {changes_path}")
 
@@ -266,7 +272,7 @@ def Delete_Users(delete_status_df):
     print(f"Deleted {delete_count} users.")
 
 
-def Archive_DeleteStatus():
+def Archive_DeleteStatus(run_id):
     """Copies the current DeleteStatus table into HIST_DeleteStatus, stamped with today's date, before
     this run replaces it. Until 2 October 2026 every run overwrote the table with no copy kept, so a
     run on a bad lookup could not be undone or even seen afterwards."""
@@ -278,27 +284,28 @@ def Archive_DeleteStatus():
             {"t": DELETE_STATUS_TABLE_NAME})]
         column_sql = ", ".join(f"[{c}]" for c in columns)
         if connection.execute(text("SELECT OBJECT_ID('HIST_DeleteStatus')")).scalar() is None:
-            connection.execute(text(f"SELECT {column_sql}, CAST(GETDATE() AS DATE) AS archived_date "
-                                    f"INTO HIST_DeleteStatus FROM {DELETE_STATUS_TABLE_NAME}"))
+            connection.execute(text(f"SELECT {column_sql}, CAST(GETDATE() AS DATE) AS archived_date, "
+                                    f"CAST(:run AS NVARCHAR(60)) AS archived_by_run "
+                                    f"INTO HIST_DeleteStatus FROM {DELETE_STATUS_TABLE_NAME}"), {"run": run_id})
         else:
-            connection.execute(text(f"INSERT INTO HIST_DeleteStatus ({column_sql}, archived_date) "
-                                    f"SELECT {column_sql}, CAST(GETDATE() AS DATE) FROM {DELETE_STATUS_TABLE_NAME}"))
+            connection.execute(text(f"INSERT INTO HIST_DeleteStatus ({column_sql}, archived_date, archived_by_run) "
+                                    f"SELECT {column_sql}, CAST(GETDATE() AS DATE), :run FROM {DELETE_STATUS_TABLE_NAME}"), {"run": run_id})
     print("Archived the current DeleteStatus table to HIST_DeleteStatus.")
 
 
 def main(dry_run=False):
-    if not dry_run:
-        Archive_DeleteStatus()
-    entraid_table_name = collect_entraid_table_name()
+    with Run(engine, 'deletestatus', dry_run=dry_run) as run:
+        if not dry_run:
+            Archive_DeleteStatus(run.run_id)
+        entraid_table_name = collect_entraid_table_name()
 
-    delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME, dry_run)
-    entraid_status_df = pd.read_sql(text(f"SELECT * FROM AGOL_EntraID_Status"), engine)
+        delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME, dry_run)
+        entraid_status_df = pd.read_sql(text(f"SELECT * FROM AGOL_EntraID_Status"), engine)
 
-    member_table_name, item_table_name = collect_table_names()
-    Calculate_Delete_Status(delete_status_df, entraid_status_df, get_empty_users(member_table_name, item_table_name), dry_run)
-    # Delete_Users(delete_status_df)
-
-    
+        member_table_name, item_table_name = collect_table_names()
+        run.note(member_table=member_table_name, item_table=item_table_name, dry_run=dry_run)
+        Calculate_Delete_Status(delete_status_df, entraid_status_df, get_empty_users(member_table_name, item_table_name), dry_run, run)
+        # Delete_Users(delete_status_df)
 
 
 # MAIN EXECUTION
