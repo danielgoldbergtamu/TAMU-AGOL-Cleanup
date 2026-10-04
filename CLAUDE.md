@@ -57,6 +57,9 @@ employee, student employees included. **It stops returning them once the person 
 - **Students with no supervisor have no fallback contact.** Students are emailed at the end of
   each semester to collect their own data, and that notice is their warning. Don't invent a
   department or instructor contact for them.
+- **Departments, colleges and majors** come from the TAMU directory (`TAMU_AGOL_MQS.py`, campus
+  network only) on every catalog run, into `AGOL_MQS_Status` and the append-only `HIST_MQS_Status`.
+  Student college and major exist in the directory only while the student is enrolled.
 - The merged history lives in SQL Server as `HIST_Supervisors`, built by
   `tools/build_supervisor_history.py` from every earlier lookup.
 

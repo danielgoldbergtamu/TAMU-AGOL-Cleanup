@@ -292,6 +292,38 @@ def Upload_Tables_to_Database(item_report_df, member_report_df, entraid_status_p
     entraid_status_df = preprocess_dataframe_for_sql(entraid_status_df, entraid_dtypes)
     entraid_status_df.to_sql('AGOL_EntraID_Status', engine, if_exists='replace', index=False, dtype=entraid_dtypes)
 
+def Collect_MQS_Information(member_report_csv_path, mqs_status_path):
+    """Runs TAMU_AGOL_MQS.py (TAMU directory: department, college, major) for every member, into the
+    run's folder. Returns False, and the catalog carries on without it, when the MQS client is not
+    configured in .env, so an institution without this API can use the rest of the pipeline."""
+    if not (getenv("MQS_CLIENT_ID") and getenv("MQS_SHARED_SECRET")):
+        print("MQS_CLIENT_ID / MQS_SHARED_SECRET not set: skipping the directory lookup.")
+        return False
+    result = subprocess.Popen(
+        [sys.executable, '-u', os.path.join(SCRIPT_DIR, 'TAMU_AGOL_MQS.py'),
+         '--input_csv_path', os.path.abspath(member_report_csv_path), '--output_csv_path', mqs_status_path],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in result.stdout:
+        print(line, end='')
+    result.wait()
+    if result.returncode != 0 or not os.path.exists(mqs_status_path):
+        raise RuntimeError("Directory (MQS) lookup failed; see errors above. The database has not been changed.")
+    return True
+
+
+def Upload_MQS_Table(mqs_status_path):
+    """Loads a directory lookup as AGOL_MQS_Status. Every column is text except updated_date; the next
+    catalog run merges it into HIST_MQS_Status, so a student's college and major are kept after the
+    directory stops returning them."""
+    print("uploading directory (MQS) status to database...")
+    frame = pd.read_csv(mqs_status_path, dtype=str, keep_default_na=False, na_values=[""])
+    frame['updated_date'] = pd.to_datetime(frame['updated_date'])
+    dtypes = {c: (NVARCHAR() if c == 'OtherAttributes' else NVARCHAR(400)) for c in frame.columns if c != 'updated_date'}
+    dtypes['updated_date'] = DATETIME()
+    frame.to_sql('AGOL_MQS_Status', engine, if_exists='replace', index=False, dtype=dtypes)
+    return len(frame)
+
+
 def Catalog_and_Cleanup(run):
     """Merges the previous run's report tables into their history tables, then drops the dated tables.
     Nothing is lost: every row is in the history with the dates it was seen, and the run folder that
@@ -299,7 +331,8 @@ def Catalog_and_Cleanup(run):
     print("merging previous report tables into history...")
     pairs = [("OrganizationItems[_]20%", "HIST_OrganizationItems"),
              ("OrganizationMembers[_]20%", "HIST_OrganizationMembers"),
-             ("AGOL[_]EntraID[_]Status", "HIST_EntraID_Status")]
+             ("AGOL[_]EntraID[_]Status", "HIST_EntraID_Status"),
+             ("AGOL[_]MQS[_]Status", "HIST_MQS_Status")]
     with engine.begin() as connection:
         for pattern, history_table in pairs:
             tables = [r[0] for r in connection.execute(text(f"SELECT name FROM sys.tables WHERE name LIKE '{pattern}' ORDER BY name")).fetchall()]
@@ -329,10 +362,11 @@ def Archive_Reports_Directory():
             print(f"Left in place (in use): {filename} ({e})")
     print(f"Archived {moved} previous report files to {archive_dir}" if moved else "No previous report files to archive.")
 
-def main(entraid_csv=None):
+def main(entraid_csv=None, mqs_csv=None):
     """One catalog run. Order matters (2 October 2026): everything new is fetched and looked up FIRST, and
     the database is touched only once it all exists. With entraid_csv, an Entra lookup already made
-    (TAMU_AGOL_EntraID.py run on its own, with its sign-in) is used instead of starting a new one."""
+    (TAMU_AGOL_EntraID.py run on its own, with its sign-in) is used instead of starting a new one;
+    mqs_csv does the same for the directory lookup (TAMU_AGOL_MQS.py)."""
     with Run(engine, 'catalog') as run:
         Archive_Reports_Directory()
         item_report_df, member_report_df, item_report_csv_path, member_report_csv_path, item_report_title, member_report_title = fetch_reports(run.dir)
@@ -346,8 +380,18 @@ def main(entraid_csv=None):
         else:
             Collect_EntraID_Information(member_report_csv_path, entraid_status_path)
             run.note(entraid_source="looked up in this run")
+        mqs_status_path = run.path('MQS_Directory_Status.csv')
+        if mqs_csv:
+            shutil.copy2(mqs_csv, mqs_status_path)
+            have_mqs = True
+            run.note(mqs_source=f"supplied: {mqs_csv}")
+        else:
+            have_mqs = Collect_MQS_Information(member_report_csv_path, mqs_status_path)
+            run.note(mqs_source="looked up in this run" if have_mqs else "skipped (not configured)")
         Catalog_and_Cleanup(run)
         Upload_Tables_to_Database(item_report_df, member_report_df, entraid_status_path, item_report_title, member_report_title)
+        if have_mqs:
+            run.note(mqs_rows=Upload_MQS_Table(mqs_status_path))
         print("Catalog script execution complete.")
 
 
@@ -358,7 +402,9 @@ def main(entraid_csv=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch the newest AGOL reports, look members up in Entra, and load the database.")
     parser.add_argument("--entraid-csv", help="use this Entra lookup file instead of running a new lookup")
-    main(entraid_csv=parser.parse_args().entraid_csv)
+    parser.add_argument("--mqs-csv", help="use this directory (MQS) lookup file instead of running a new lookup")
+    arguments = parser.parse_args()
+    main(entraid_csv=arguments.entraid_csv, mqs_csv=arguments.mqs_csv)
 
 
 
