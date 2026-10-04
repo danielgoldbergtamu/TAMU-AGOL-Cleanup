@@ -34,7 +34,7 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from email.utils import formatdate
 
@@ -130,48 +130,69 @@ def main():
     if args.limit:
         members = members[: args.limit]
     netids = [netid_for(m, domain, suffix) for m in members]
-    print(f"{len(members)} members; {sum(1 for n in netids if n)} with a NetID to look up.", flush=True)
 
-    started = time.time()
-    to_query = sorted({n for n in netids if n})
-    results = {}
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        for i, (netid, result) in enumerate(zip(to_query, pool.map(lambda n: lookup(n, client_id, secret), to_query)), 1):
-            results[netid] = result
-            if i % 500 == 0 or i == len(to_query):
-                print(f"  {i}/{len(to_query)} looked up", flush=True)
+    # Progress goes to a log file beside the output, flushed line by line, so it can be read while the
+    # run is going (a PowerShell transcript only shows a program's output once the program ends), and
+    # each result is written to the CSV as soon as it arrives, so a run that stops part-way keeps it.
+    os.makedirs(os.path.dirname(os.path.abspath(args.output_csv_path)), exist_ok=True)
+    log = open(os.path.splitext(args.output_csv_path)[0] + ".progress.log", "a", encoding="utf-8", buffering=1)
 
+    def say(message):
+        line = f"{time.strftime('%H:%M:%S')} {message}"
+        print(line, flush=True)
+        log.write(line + "\n")
+
+    say(f"{len(members)} members; {sum(1 for n in netids if n)} with a NetID to look up.")
     run_date = date.today().isoformat()
-    rows = []
+    members_by_netid = {}
     for member, netid in zip(members, netids):
+        members_by_netid.setdefault(netid, []).append(member)
+    counts = {}
+
+    def base_row(member, netid):
         row = {c: "" for c in OUTPUT_COLUMNS}
         row.update({"Username": member.get("Username", ""), "NetIDTried": netid, "updated_date": run_date})
-        if not netid:
-            row["MQS_Status"] = "no NetID"
-        else:
-            status, entry = results.get(netid, (0, None))
-            row["HTTPStatus"] = status
-            if status == 200 and entry:
-                row["MQS_Status"] = "found"
-                for a in ATTRIBUTES:
-                    row[a] = flatten(entry.get(a))
-                others = sorted(k for k in entry if k not in ATTRIBUTES)
-                row["OtherAttributes"] = ", ".join(others)   # names only: shows what this client can see
-            else:
-                row["MQS_Status"] = "not found" if status in (200, 404) else f"error {status}"
-        rows.append(row)
+        return row
 
-    os.makedirs(os.path.dirname(os.path.abspath(args.output_csv_path)), exist_ok=True)
+    started = time.time()
+    to_query = sorted(n for n in members_by_netid if n)
     with open(args.output_csv_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=OUTPUT_COLUMNS, quoting=csv.QUOTE_ALL)
         writer.writeheader()
-        writer.writerows(rows)
 
-    counts = {s: sum(1 for r in rows if r["MQS_Status"] == s) for s in sorted({r["MQS_Status"] for r in rows})}
-    with_dept = sum(1 for r in rows if r["tamuEduPersonDepartmentName"] or r["department"])
-    with_major = sum(1 for r in rows if r["tamuEduPersonPrimaryMajor"])
-    print(f"Done in {(time.time() - started) / 60:.1f} min: {counts}; {with_dept} with a department, "
-          f"{with_major} with a primary major. Wrote {args.output_csv_path}")
+        def write(row):
+            writer.writerow(row)
+            counts[row["MQS_Status"]] = counts.get(row["MQS_Status"], 0) + 1
+
+        for member in members_by_netid.get("", []):
+            row = base_row(member, "")
+            row["MQS_Status"] = "no NetID"
+            write(row)
+        fh.flush()
+
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {pool.submit(lookup, n, client_id, secret): n for n in to_query}
+            for i, future in enumerate(as_completed(futures), 1):
+                netid = futures[future]
+                status, entry = future.result()
+                for member in members_by_netid[netid]:
+                    row = base_row(member, netid)
+                    row["HTTPStatus"] = status
+                    if status == 200 and entry:
+                        row["MQS_Status"] = "found"
+                        for a in ATTRIBUTES:
+                            row[a] = flatten(entry.get(a))
+                        others = sorted(k for k in entry if k not in ATTRIBUTES)
+                        row["OtherAttributes"] = ", ".join(others)   # names only: shows what this client can see
+                    else:
+                        row["MQS_Status"] = "not found" if status in (200, 404) else f"error {status}"
+                    write(row)
+                fh.flush()
+                if i % 250 == 0 or i == len(to_query):
+                    rate = i / max(time.time() - started, 1)
+                    say(f"{i}/{len(to_query)} looked up; {counts}; about {(len(to_query) - i) / rate / 60:.0f} min left")
+
+    say(f"Done in {(time.time() - started) / 60:.1f} min: {counts}. Wrote {args.output_csv_path}")
 
 
 if __name__ == "__main__":
