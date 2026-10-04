@@ -18,8 +18,10 @@ data/
 *.bak
 !tests/fixtures/**
 
-# Secrets
+# Secrets: .env and any copy of it (.env.bak, .env.home, ...); the template stays tracked
 .env
+.env.*
+!.env.example
 
 # Email templates with local wording
 /*EmailTemplate.txt
