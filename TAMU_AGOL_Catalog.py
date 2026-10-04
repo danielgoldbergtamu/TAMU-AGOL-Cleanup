@@ -215,14 +215,12 @@ def fetch_reports(out_dir):
     # Save the DataFrames as CSV files
     item_report_title = item_report.title.replace("/", "_").replace("-", "_")
     member_report_title = member_report.title.replace("/", "_").replace("-", "_")
-    item_report_df.to_csv(os.path.join(SCRIPT_DIR, 'reports', f'{item_report_title}.csv'), index=False)
-    member_report_df.to_csv(os.path.join(SCRIPT_DIR, 'reports', f'{member_report_title}.csv'), index=False)
-
-    print (f'saved item report to ./reports/{item_report_title}.csv'
-           f'\nsaved member report to ./reports/{member_report_title}.csv')
-
-    member_report_csv_path = f'./reports/{member_report_title}.csv'
-    item_report_csv_path = f'./reports/{item_report_title}.csv'
+    # Into this run's folder, so no run ever shares a file name with another.
+    item_report_csv_path = os.path.join(out_dir, f'{item_report_title}.csv')
+    member_report_csv_path = os.path.join(out_dir, f'{member_report_title}.csv')
+    item_report_df.to_csv(item_report_csv_path, index=False)
+    member_report_df.to_csv(member_report_csv_path, index=False)
+    print(f'saved item report to {item_report_csv_path}\nsaved member report to {member_report_csv_path}')
 
     return (
         item_report_df,
