@@ -44,8 +44,9 @@ To learn more about Texas A&M's ArcGIS Online policies, visit: https://service.t
 5) ArcGIS Online report generation
     - Generate a new report for Organization Items and Members before running the scripts.
 
-6) Microsoft EntraID and Mg Graph Users (PowerShell 7.0+)
-    - Texas A&M uses EntraID for identity management, so this script accesses the Mg Graph library in PowerShell 7.0 to document users and their affiliation within the University. This is used to determine whether or not to delete a user.
+6) Microsoft Entra ID, through Microsoft Graph (Python; no PowerShell)
+    - Texas A&M uses Entra ID for identity management. TAMU_AGOL_EntraID.py looks up each AGOL member's affiliation, department, supervisor and groups, 20 members per Graph request, with a browser sign-in. This is used to determine whether or not to delete a user.
+    - It replaced TAMU_AGOL_EntraID.ps1 on 3 October 2026. On the same 12,531 members the two agreed on every field except where the PowerShell script had two bugs (an alias bug that marked 94 current members as not in Entra, and a 1,000-character cut of 1,299 group lists), and the Python version took 5.5 minutes instead of 4 hours 10 minutes. The PowerShell script is in the git history if it is ever needed.
 
 
 ## Database Tables
@@ -87,7 +88,7 @@ TAMU_AGOL_Main.py calls all other scripts in the following order:
 1) TAMU_AGOL_Catalog.py
     - Takes previous member, items, and entraid reports (if still present in Database), and adds them to their associated history tables.
     - Collects new AGOL reports and adds them as database tables.
-    - Uses current member report to generate new EntraID Status table (Using TAMU_AGOL_EntraID.ps1) and adds it as a new table in the database.
+    - Uses current member report to generate new EntraID Status table (using TAMU_AGOL_EntraID.py, or a lookup file passed with --entraid-csv) and adds it as a new table in the database.
 
 2) TAMU_AGOL_DeleteStatus.py
     - Uses current member and entraid reports to determine which users should be flagged for deletion and which ones have been flagged for a month and should be deleted.

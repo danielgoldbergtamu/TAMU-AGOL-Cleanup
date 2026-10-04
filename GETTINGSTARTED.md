@@ -146,7 +146,9 @@ A Python "Environment" is basically a specific installation of Python. Since Pyt
     - python -m pip install python-dotenv
 
 
-## III. Installing PowerShell 7 and Microsoft Graph library
+## III. Installing PowerShell 7 and Microsoft Graph library (no longer needed)
+
+**Since 3 October 2026 this step is not needed.** The Entra lookup is TAMU_AGOL_EntraID.py, which calls Microsoft Graph directly from Python and needs only the requests and python-dotenv packages; it opens a browser for sign-in. The steps below are kept for reference only.
 
 PowerShell 5 comes with Windows, however, this project uses PowerShell version 7+ which you need to install separately, as well as the Microsoft Graph Module which is used to access TAMU's identity management system (EntraID).
 

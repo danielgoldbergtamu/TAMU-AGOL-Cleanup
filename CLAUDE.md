@@ -72,8 +72,9 @@ Dan, 2 October 2026: "we do not delete prior runs or data when we initiate new r
 The target is **Python only**. The ArcGIS API for Python handles exports and deletes, Microsoft
 Graph is called from Python for identity, and DuckDB holds the catalog and queries. For now:
 
-- `TAMU_AGOL_EntraID.ps1` is the last PowerShell step. **It downloads the whole tenant on every
-  run** (`Get-MgUser -All`). Its replacement looks up only AGOL members, batched.
+- The PowerShell lookup (`TAMU_AGOL_EntraID.ps1`) was retired on 3 October 2026, after a
+  person-by-person comparison with `TAMU_AGOL_EntraID.py` on the same 12,531 members agreed everywhere
+  except its two bugs. It is in the git history. The toolchain has no PowerShell now.
 - SQL Server (`AGOLCleanup`) holds the catalog until DuckDB replaces it.
 - GEO Jobe stays the item-delete tool until the API deleter is proven.
 
