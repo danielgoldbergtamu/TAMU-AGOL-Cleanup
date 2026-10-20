@@ -71,6 +71,8 @@ if (Test-Path $builder) {
     Step 'dashboard data and snapshot' @($builder, '--groups', "$run\groups", '--out', (Join-Path $Repo 'private\data'), '--changes', "$($dry.FullName)\DeleteStatus_changes.csv") 'dashboard.log'
     $json = Get-ChildItem (Join-Path $Repo 'private\data') -Filter 'dashboard_data_*.json' | Sort-Object Name | Select-Object -Last 1
     Step 'dashboard page' @((Join-Path $Repo 'private\dashboard\build_dashboard.py'), $json.FullName) 'dashboard.log'
+    $full = Join-Path $Repo 'private\dashboard\build_full_dashboard.py'
+    if (Test-Path $full) { Step 'full dashboard (both editions)' @($full) 'dashboard.log' }
 }
 Say "Weekly run finished. Removal summary: $run\removal\removal_summary.txt"
 Get-Content "$run\removal\removal_summary.txt" | Select-Object -Last 4 | ForEach-Object { Say $_ }
