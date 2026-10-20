@@ -159,18 +159,39 @@ def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name, dry_
 
 
 
+def person_map(usernames):
+    """{account username (lower): the person's NetID}. From HIST_AccountNetIDs (the userPrincipalName the
+    Entra lookup matched, latest sighting), else, for a NetID (SSO) account, the NetID in its username.
+    ArcGIS-login accounts the lookup has never matched belong to no known person and are left out."""
+    suffix = (getenv("AGOL_USERNAME_SUFFIX") or "").lower()
+    out = {}
+    for u in usernames:
+        u = str(u).strip().lower()
+        if suffix and u.endswith(suffix) and "@" in u:
+            out[u] = u[: -len(suffix)]
+    with engine.connect() as connection:
+        if connection.execute(text("SELECT OBJECT_ID('dbo.HIST_AccountNetIDs')")).scalar() is not None:
+            for u, netid in connection.execute(text("SELECT Username, NetID FROM dbo.HIST_AccountNetIDs ORDER BY LastSeen")):
+                out[u.strip().lower()] = netid.strip().lower()
+    return out
+
+
 def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dry_run=False, run=None):
     """Recalculates every member's DeleteStatus from the latest EntraID lookup and writes it back.
 
     Rules, applied to every member on every run (2 October 2026 rewrite, register AGOL-024):
       - Override set                         -> 0
+      - another account of the same person is current -> 0. Accounts are tied to a person by the NetID the
+        Entra lookup matched (HIST_AccountNetIDs), so an ArcGIS login with any username (a class or project
+        account) follows its owner's NetID account (Dan, 20 October 2026).
       - no row in the lookup at all          -> unchanged. Missing data is not evidence of leaving.
       - found in a current-affiliation group -> 0, at ANY earlier status. Before the rewrite only
         status-0 members were checked, so a wrong flag could never clear and a flagged member moved
         to 2 after 30 days whatever Entra said by then.
       - left, owns nothing, NetID login, owns no groups -> 2 at once; FlagDate kept from the first time
         (20 October 2026; until then every empty account went to 2 whatever the person's affiliation)
-      - otherwise (not current): 0 -> 1 (flagged); 1 for 30+ days -> 2; else unchanged.
+      - otherwise (not current): 0 -> 1 (flagged); 1 for 30+ days -> 2; else unchanged. A person's flagged
+        accounts reach 2 together: only once the most recently flagged of them is 30 days old.
 
     Every change is written to reports/DeleteStatus_changes_<date>.csv. The run refuses to save if
     it would newly flag more than MAX_NEW_FLAG_FRACTION of the currently unflagged members (default
@@ -187,6 +208,11 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
         groups = {g.strip().lower() for g in str(r.Groups or "").split(',') if g.strip()} if not pd.isna(r.Groups) else set()
         lookup[str(r.Username).strip().lower()] = (r.EntraID_Status, groups)
     empty_users = {str(u).strip().lower() for u in empty_users}
+
+    # Who each account belongs to, and which people are current through any of their accounts.
+    person = person_map(delete_status_df['Username'])
+    current_people = {person[u] for u, (status, groups) in lookup.items()
+                      if u in person and status == 1 and groups & whitelisted_group_ids}
 
     changes = []
     unflagged_before = max(1, int((delete_status_df['DeleteStatus'] == 0).sum()))
@@ -206,6 +232,9 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
 
         if row.Override:
             set_status(row.Index, row, 0, "override", None, None)
+
+        elif person.get(username) in current_people and not (entra and entra[0] == 1 and entra[1] & whitelisted_group_ids):
+            set_status(row.Index, row, 0, "current affiliation (another account of the same person)", None, None)
 
         elif entra is None:
             continue
@@ -227,6 +256,28 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
 
         elif row.DeleteStatus == 1 and not pd.isna(row.FlagDate) and (CURRENT_DATE - pd.Timestamp(row.FlagDate).date()).days >= 30:
             set_status(row.Index, row, 2, "flagged 30+ days", delete_date=CURRENT_DATE)
+
+    # A person's flagged accounts reach 2 together: undo a move to 2 while another of their accounts was
+    # flagged less than 30 days ago (for example an account flagged for the first time in this run).
+    keys = delete_status_df['Username'].astype(str).str.strip().str.lower()
+    flagged = delete_status_df[delete_status_df['DeleteStatus'] == 1]
+    latest_flag = {}
+    for u, flag_date in zip(keys[flagged.index], flagged['FlagDate']):
+        if u in person and not pd.isna(flag_date):
+            d = pd.Timestamp(flag_date).date()
+            latest_flag[person[u]] = max(latest_flag.get(person[u], d), d)
+    held = set()
+    for index, u in keys.items():
+        p = person.get(u)
+        if (p in latest_flag and delete_status_df.at[index, 'DeleteStatus'] == 2
+                and (CURRENT_DATE - latest_flag[p]).days < 30
+                and any(c["Username"] == delete_status_df.at[index, 'Username'] and c["Reason"] == "flagged 30+ days" for c in changes)):
+            delete_status_df.at[index, 'DeleteStatus'] = 1
+            delete_status_df.at[index, 'DeleteDate'] = None
+            held.add(delete_status_df.at[index, 'Username'])
+    if held:
+        changes[:] = [c for c in changes if not (c["Username"] in held and c["Reason"] == "flagged 30+ days")]
+        print(f"Held at 1 until the person's latest flag is 30 days old: {len(held)} accounts")
 
     counts = delete_status_df['DeleteStatus'].value_counts().to_dict()
     moved = pd.DataFrame(changes, columns=["Username", "From", "To", "Reason"])

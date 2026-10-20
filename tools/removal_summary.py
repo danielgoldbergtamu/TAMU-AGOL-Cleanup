@@ -12,6 +12,10 @@ and sorts members into the removal groups of the process:
   Administrators and other non-standard roles found in any group are listed for review, never counted as
   removable.
 
+Accounts belong to people: the NetID the Entra lookup matched (HIST_AccountNetIDs), or the NetID in a NetID
+account's username. review_people_multiple_accounts.csv lists everyone with more than one account, and
+review_consolidate_arcgis_logins.csv the ArcGIS-login accounts of current people (kept; to be merged).
+
 Writes into --out:
   removal_summary.txt / .csv   counts only (users, items, feature GB, file GB per group)
   review_*.csv                 the people and items behind each group, for review. These name people:
@@ -64,6 +68,8 @@ def main():
         items = pd.read_sql(text(f"SELECT [Item ID], [Title], [Item Type], [Owner], [Share Level], [# of Groups shared with], "
                                  f"[Date Last Viewed], [Feature Storage Size], [File Storage Size], [In Recycle Bin] FROM dbo.[{items_table}]"), c)
         status = pd.read_sql(text("SELECT Username, DeleteStatus, Override FROM dbo.DeleteStatus"), c)
+        has_netids = c.execute(text("SELECT OBJECT_ID('dbo.HIST_AccountNetIDs')")).scalar() is not None
+        netids = pd.read_sql(text("SELECT Username, NetID, LastSeen FROM dbo.HIST_AccountNetIDs"), c) if has_netids else None
         looked_up = pd.read_sql(text("SELECT Username FROM dbo.AGOL_EntraID_Status"), c)["Username"]
         has_supervisors = c.execute(text("SELECT OBJECT_ID('dbo.HIST_Supervisors')")).scalar() is not None
         supervisors = pd.read_sql(text("SELECT UserEmail, ManagerEmail, LastSeen FROM dbo.HIST_Supervisors"), c) if has_supervisors else None
@@ -136,6 +142,25 @@ def main():
     for name, prefix in (("review_empty_accounts.csv", "1."), ("review_status2_owners.csv", "2."),
                          ("review_status1_owners.csv", "3."), ("review_admins_roles_and_other_empty.csv", "Review")):
         members[members["group"].str.startswith(prefix)].sort_values("feature_gb", ascending=False)[columns].to_csv(os.path.join(args.out, name), index=False)
+    # People with more than one account, and current people's ArcGIS logins to consolidate.
+    suffix = (os.getenv("AGOL_USERNAME_SUFFIX") or "").lower()
+    person = {k: k[: -len(suffix)] for k, lt in zip(members["key"], members["Login Type"])
+              if lt == "enterprise" and suffix and k.endswith(suffix) and "@" in k}
+    if netids is not None:
+        for u, n in netids.sort_values("LastSeen")[["Username", "NetID"]].itertuples(index=False):
+            person[u.strip().lower()] = n.strip().lower()
+    members["person"] = members["key"].map(person)
+    multi = members[members["person"].notna()].groupby("person").filter(lambda g: len(g) > 1)
+    current_people = set(members.loc[members["person"].notna() & (members["projected_status"] == 0) & (members["Login Type"] == "enterprise"), "person"])
+    multi.sort_values(["person", "feature_gb"], ascending=[True, False])[["person"] + columns + ["group"]].to_csv(
+        os.path.join(args.out, "review_people_multiple_accounts.csv"), index=False)
+    cons = members[(members["Login Type"] == "arcgis") & members["person"].isin(current_people)]
+    cons.sort_values("feature_gb", ascending=False)[["person"] + columns].to_csv(os.path.join(args.out, "review_consolidate_arcgis_logins.csv"), index=False)
+    with open(os.path.join(args.out, "removal_summary.txt"), "a", encoding="utf-8") as out:
+        out.write(f"\nPeople with more than one account: {multi['person'].nunique():,} ({len(multi):,} accounts, {multi['feature_gb'].sum():,.1f} GB feature)\n")
+        out.write(f"ArcGIS logins of current people, to consolidate (kept): {len(cons):,} accounts, {int(cons['items'].sum()):,} items, {cons['feature_gb'].sum():,.1f} GB feature\n")
+        out.write(f"ArcGIS-login accounts tied to a NetID: {int(((members['Login Type'] == 'arcgis') & members['person'].notna()).sum()):,} of {int((members['Login Type'] == 'arcgis').sum()):,}\n")
+
     status2 = set(members.loc[members["group"].str.startswith("2."), "key"])
     items[items["owner_key"].isin(status2)].drop(columns=["owner_key"]).to_csv(os.path.join(args.out, "review_status2_items.csv"), index=False)
     print(open(os.path.join(args.out, "removal_summary.txt"), encoding="utf-8").read())

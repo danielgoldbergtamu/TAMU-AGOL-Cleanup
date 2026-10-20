@@ -22,8 +22,9 @@
 #
 # Every run also adds the supervisors it sees to the HIST_Supervisors table, because Entra stops
 # returning a supervisor once someone leaves (see CLAUDE.md), and the first and last names of the members
-# and supervisors it finds to HIST_PersonNames, for the same reason (20 October 2026). Turn both off with
-# --no-history.
+# and supervisors it finds to HIST_PersonNames, for the same reason (20 October 2026), and each account's
+# NetID (its Entra userPrincipalName) to HIST_AccountNetIDs, so that every account of one person, ArcGIS
+# logins with any username included, can be assessed together. Turn all three off with --no-history.
 #
 # Configuration (.env beside this file):
 #   ENTRA_TENANT          tenant id or primary domain
@@ -293,6 +294,31 @@ def record_names(people, run_date, source):
     print(f"Name history: {count} names recorded in HIST_PersonNames.")
 
 
+def record_netids(pairs, run_date):
+    """Adds (AGOL username, NetID) pairs to HIST_AccountNetIDs; the NetID is the Entra userPrincipalName the
+    account matched, whatever address matched it. One row per pair, with the dates it was seen."""
+    from sqlalchemy import text
+
+    engine = sql_engine()
+    if engine is None:
+        print("SQL_CONNECTION_STRING not set; account NetIDs NOT recorded.")
+        return
+    merge = text("""
+        MERGE dbo.HIST_AccountNetIDs AS t
+        USING (SELECT :user AS Username, :netid AS NetID) AS s ON t.Username = s.Username AND t.NetID = s.NetID
+        WHEN MATCHED THEN UPDATE SET LastSeen = CASE WHEN t.LastSeen < :seen THEN :seen ELSE t.LastSeen END,
+                                     FirstSeen = CASE WHEN t.FirstSeen > :seen THEN :seen ELSE t.FirstSeen END
+        WHEN NOT MATCHED THEN INSERT (Username, NetID, FirstSeen, LastSeen) VALUES (:user, :netid, :seen, :seen);""")
+    with engine.begin() as conn:
+        conn.execute(text("""
+            IF OBJECT_ID('dbo.HIST_AccountNetIDs') IS NULL
+            CREATE TABLE dbo.HIST_AccountNetIDs (Username NVARCHAR(255) NOT NULL, NetID NVARCHAR(255) NOT NULL,
+                FirstSeen DATE NOT NULL, LastSeen DATE NOT NULL)"""))
+        for user, netid in pairs:
+            conn.execute(merge, {"user": user.strip().lower(), "netid": netid.strip().lower(), "seen": run_date})
+    print(f"Account NetIDs: {len(pairs)} recorded in HIST_AccountNetIDs.")
+
+
 def record_supervisors(rows, run_date):
     from sqlalchemy import text
 
@@ -382,6 +408,24 @@ def main():
             tried[int(rid)].append(upn)
             found[int(rid)] = (users[0], upn)
 
+    # 2b. Still unmatched: look among every address on the mailbox (proxyAddresses), e.g. an old
+    #     email.tamu.edu or departmental address on an ArcGIS-login account (20 October 2026).
+    proxy_specs = {}
+    for i, emails in tried.items():
+        if i not in found and emails:
+            clause = " or ".join(f"proxyAddresses/any(p:p eq {odata_list(['smtp:' + e])})" for e in emails)
+            proxy_specs[str(i)] = {"url": users_url(clause) + "&$count=true", "headers": {"ConsistencyLevel": "eventual"}}
+    proxy_failed = 0
+    for rid, (status, body) in run_all(auth, proxy_specs, args.workers, "proxy address match").items():
+        proxy_failed += status != 200
+        users = body.get("value", []) if status == 200 else []
+        if users and users[0].get("userPrincipalName"):
+            upn = users[0]["userPrincipalName"]
+            tried[int(rid)].append(upn)
+            found[int(rid)] = (users[0], upn)
+    if proxy_failed:
+        print(f"  proxy address match: {proxy_failed} requests failed (those members stay unmatched)")
+
     # 3. Supervisor and groups for every matched account.
     ids = {user["id"] for user, _ in found.values()}
     manager_specs = {f"m{uid}": {"url": f"/users/{uid}/manager?$select=mail,department,displayName,givenName,surname"} for uid in ids}
@@ -389,7 +433,7 @@ def main():
     extra = run_all(auth, {**manager_specs, **group_specs}, args.workers, "supervisors and groups")
 
     run_date = date.today()
-    rows, errors, names = [], [], []
+    rows, errors, names, netids = [], [], [], []
     for i, member in enumerate(members):
         emails = tried[i]
         row = {"Username": member.get("Username", ""), "Email": member.get("Email", ""), "Name": member.get("Name", ""),
@@ -412,6 +456,8 @@ def main():
                 "Groups": ", ".join(g["id"] for g in groups),   # never cut: a dropped affiliation group reads as "departed"
             })
             names.append((member_key(row["Username"], suffix), user.get("givenName"), user.get("surname"), user.get("displayName")))
+            if user.get("userPrincipalName"):
+                netids.append((row["Username"], user["userPrincipalName"]))
             if m_status == 200 and m_body.get("mail"):
                 names.append((m_body["mail"], m_body.get("givenName"), m_body.get("surname"), m_body.get("displayName")))
         rows.append(row)
@@ -433,6 +479,7 @@ def main():
     if not args.no_history:
         record_supervisors(rows, run_date)
         record_names(names, run_date, "TAMU_AGOL_EntraID.py")
+        record_netids(netids, run_date)
 
 
 if __name__ == "__main__":
