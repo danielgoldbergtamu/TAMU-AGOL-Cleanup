@@ -242,14 +242,21 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
 
     max_fraction = float(getenv("MAX_NEW_FLAG_FRACTION") or 0.05)
     newly_flagged = sum(1 for c in changes if c["From"] == 0 and c["To"] == 1)
-    if newly_flagged > max_fraction * unflagged_before:
-        raise RuntimeError(
-            f"Refusing to save: {newly_flagged} of {unflagged_before} unflagged members would be newly flagged, "
-            f"more than {max_fraction:.0%}. Check the EntraID lookup before trusting it. Nothing was written.")
+    over_limit = newly_flagged > max_fraction * unflagged_before
+    limit_message = (f"{newly_flagged} of {unflagged_before} unflagged members would be newly flagged, "
+                     f"more than {max_fraction:.0%}. Check the EntraID lookup before trusting it.")
+    if run is not None:
+        run.note(newly_flagged=newly_flagged, unflagged_before=unflagged_before, over_new_flag_limit=over_limit)
 
     if dry_run:
+        # A dry run saves nothing, so it reports the limit instead of stopping, and always finishes.
+        if over_limit:
+            print("WARNING: a real run would refuse to save: " + limit_message)
         print("Dry run: DeleteStatus table NOT updated.")
         return
+
+    if over_limit:
+        raise RuntimeError("Refusing to save: " + limit_message + " Nothing was written.")
 
     # Upload the updated delete status DataFrame back to the database
     delete_status_df.to_sql(DELETE_STATUS_TABLE_NAME, con=engine, if_exists='replace', index=False, dtype=deletestatus_sql_datatypes())
