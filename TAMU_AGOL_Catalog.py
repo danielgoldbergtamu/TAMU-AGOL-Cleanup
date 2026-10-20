@@ -106,9 +106,9 @@ def get_report_sql_dtypes(report_name):
     """Function to define and apply SQL table data types for AGOL reports"""
     if 'OrganizationItems' in report_name:
         return {
-            'Title': NVARCHAR(255),
+            'Title': NVARCHAR(),         # free text: no fixed width (20 Oct 2026)
             'Item ID': NVARCHAR(255),
-            'Item Url': NVARCHAR(255),
+            'Item Url': NVARCHAR(),      # Living Atlas app URLs exceed 255 characters (20 Oct 2026)
             'Item Type': NVARCHAR(255),
             'Date Created': DATETIME(),
             'Date Modified' : DATETIME(),

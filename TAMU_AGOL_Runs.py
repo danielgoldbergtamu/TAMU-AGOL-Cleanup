@@ -147,6 +147,17 @@ def _hash_expression(history_columns, source_alias, source_types):
     return f"HASHBYTES('SHA2_256', CONCAT_WS(NCHAR(31), {', '.join(parts)}))"
 
 
+def _wider(new_type, old_type):
+    """True when new_type is the same kind of text column as old_type but longer (or unlimited)."""
+    def parse(t):
+        base, _, size = t.partition("(")
+        return base, (10 ** 9 if size.rstrip(")") == "max" else int(size.rstrip(")") or 0)) if size else None
+    new_base, new_size = parse(new_type)
+    old_base, old_size = parse(old_type)
+    return (new_base == old_base and new_base in ("nvarchar", "varchar") and new_size is not None
+            and old_size is not None and new_size > old_size)
+
+
 def _attribute_columns(columns):
     return [(n, t) for n, t in columns if n not in HISTORY_META_COLUMNS]
 
@@ -190,11 +201,16 @@ def merge_snapshot_into_history(connection, history_table, snapshot_table, run_i
         prepare_history_table(connection, history_table)
 
     snapshot_columns = _attribute_columns(_columns(connection, snapshot_table))
-    history_names = {n for n, _ in _columns(connection, history_table)}
+    history_types = dict(_columns(connection, history_table))
     for name, sql_type in snapshot_columns:
-        if name not in history_names:
+        if name not in history_types:
             connection.execute(text(f"ALTER TABLE dbo.[{history_table}] ADD [{name}] {sql_type} NULL"))
             print(f"  {history_table}: added new column [{name}] from {snapshot_table}")
+        elif _wider(sql_type, history_types[name]):
+            # A newer report allows longer text than the history (20 October 2026: an item URL over 255
+            # characters). Widen the history; existing values, and so their fingerprints, are unchanged.
+            connection.execute(text(f"ALTER TABLE dbo.[{history_table}] ALTER COLUMN [{name}] {sql_type} NULL"))
+            print(f"  {history_table}: widened [{name}] from {history_types[name]} to {sql_type}")
 
     history_columns = _attribute_columns(_columns(connection, history_table))
     snapshot_types = dict(snapshot_columns)
