@@ -208,9 +208,22 @@ def format_email(value, domain, suffix):
 
 
 def emails_to_try(row, domain, suffix):
+    """Addresses that identify this account's person. A NetID (SSO) account: its email and its NetID. An
+    ArcGIS-login account: only the email on the account, plus the NetID when that email is at the org domain
+    or at its "email." subdomain (the old student address). Never the username of an ArcGIS login, and never
+    the local part of any other address: an ArcGIS username that happens to look like a NetID, or a gmail
+    address's local part, is a different person's NetID as often as not (20 October 2026; until then both
+    were tried, as in the PowerShell version, and 167 ArcGIS logins matched an address that was only a guess)."""
+    username = (row.get("Username") or "").strip().lower()
+    email = (row.get("Email") or "").strip()
+    local, _, mail_domain = email.lower().rpartition("@")
+    candidates = [email]
+    if suffix and username.endswith(suffix.lower()) and "@" in username:
+        candidates.append(format_email(username, domain, suffix))
+    if local and mail_domain in (domain.lower(), "email." + domain.lower()):
+        candidates.append(f"{local}@{domain}")
     seen, out = set(), []
-    for value in (row.get("Email"), format_email(row.get("Username"), domain, suffix),
-                  format_email(row.get("Email"), domain, suffix)):
+    for value in candidates:
         value = (value or "").strip()
         if value and value.lower() not in seen:
             seen.add(value.lower())
