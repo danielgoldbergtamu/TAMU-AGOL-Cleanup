@@ -11,6 +11,7 @@ Managed by Texas A&M GIS Help Desk: tx.ag/GISHelpDesk
 - [docs/method.md](docs/method.md): the approach, the classes of content, and the process
 - [docs/usage-rules.md](docs/usage-rules.md): the rules users are shown
 - [docs/lessons.md](docs/lessons.md): what went wrong, or nearly did
+- [docs/data-model.md](docs/data-model.md): proposed data model (for review): runs, things, observations, and the decision and action records
 - [sql/](sql/): the selection queries, run against the catalog database (start with `00_setup.sql`)
 
 **This repository is public and holds no organization data.** Reports, lookups and results stay in
