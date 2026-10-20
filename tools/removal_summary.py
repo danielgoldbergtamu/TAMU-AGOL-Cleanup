@@ -64,12 +64,17 @@ def main():
         items = pd.read_sql(text(f"SELECT [Item ID], [Title], [Item Type], [Owner], [Share Level], [# of Groups shared with], "
                                  f"[Date Last Viewed], [Feature Storage Size], [File Storage Size], [In Recycle Bin] FROM dbo.[{items_table}]"), c)
         status = pd.read_sql(text("SELECT Username, DeleteStatus, Override FROM dbo.DeleteStatus"), c)
+        looked_up = pd.read_sql(text("SELECT Username FROM dbo.AGOL_EntraID_Status"), c)["Username"]
         has_supervisors = c.execute(text("SELECT OBJECT_ID('dbo.HIST_Supervisors')")).scalar() is not None
         supervisors = pd.read_sql(text("SELECT UserEmail, ManagerEmail, LastSeen FROM dbo.HIST_Supervisors"), c) if has_supervisors else None
 
     key = lambda s: s.astype(str).str.strip().str.lower()
     projected = dict(zip(key(status["Username"]), status["DeleteStatus"]))
     overrides = set(key(status.loc[status["Override"].fillna(False).astype(bool), "Username"]))
+    # A real run adds every looked-up member missing from DeleteStatus at status 0 before assessing them;
+    # a dry run saves no rows, and its changes file lists only those whose status then moves.
+    for user in key(looked_up):
+        projected.setdefault(user, 0)
     with open(args.changes, encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             projected[row["Username"].strip().lower()] = int(row["To"])
@@ -103,7 +108,7 @@ def main():
         if row["projected_status"] == 1:
             return "3. Status 1 with content (after 30 days and the backup)" if row["items"] else "3. Status 1, empty (after 30 days)"
         if pd.isna(row["projected_status"]):
-            return "Not yet assessed (no DeleteStatus row)"
+            return "Not yet assessed (not in the Entra lookup)"
         return "Kept (status 0)"
 
     members["group"] = members.apply(group, axis=1)
