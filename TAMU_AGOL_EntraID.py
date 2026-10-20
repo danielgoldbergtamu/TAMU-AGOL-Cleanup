@@ -21,7 +21,9 @@
 # groups unaffected.
 #
 # Every run also adds the supervisors it sees to the HIST_Supervisors table, because Entra stops
-# returning a supervisor once someone leaves (see CLAUDE.md). Turn that off with --no-history.
+# returning a supervisor once someone leaves (see CLAUDE.md), and the first and last names of the members
+# and supervisors it finds to HIST_PersonNames, for the same reason (20 October 2026). Turn both off with
+# --no-history.
 #
 # Configuration (.env beside this file):
 #   ENTRA_TENANT          tenant id or primary domain
@@ -57,7 +59,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GRAPH = "https://graph.microsoft.com/v1.0"
 SCOPES = "https://graph.microsoft.com/User.Read.All offline_access"   # what Connect-MgGraph -Scopes User.Read.All asks for
 BATCH_SIZE = 20                       # Graph's limit per $batch request
-USER_FIELDS = "id,userPrincipalName,mail,department,displayName"
+USER_FIELDS = "id,userPrincipalName,mail,department,displayName,givenName,surname"
 OUTPUT_COLUMNS = ["Username", "Email", "Name", "EmailsTried", "EntraID_Status", "ManagerEmail",
                   "ManagerDepartment", "UserDepartment", "WorkingEmail", "Groups", "updated_date"]
 
@@ -236,17 +238,68 @@ def pick_match(candidates, users):
 # Supervisor history (CLAUDE.md: capture supervisors every run, never overwrite with a blank)
 ###########################################################################################
 
-def record_supervisors(rows, run_date):
-    from sqlalchemy import create_engine, text
+def sql_engine():
+    from sqlalchemy import create_engine
 
     url = (os.getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
     if not url:
+        return None
+    if "://" in url:
+        return create_engine(url)
+    # a raw ODBC connection string, as the other scripts also accept
+    return create_engine("mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(url))
+
+
+def member_key(username, suffix):
+    """netid@example.edu_org -> netid@example.edu: the key HIST_Supervisors and HIST_PersonNames use."""
+    user = (username or "").strip().lower()
+    return user[: -len(suffix)] if suffix and user.endswith(suffix.lower()) else user
+
+
+def record_names(people, run_date, source):
+    """Adds first and last names to HIST_PersonNames, one row per email and name; a changed name is a new
+    row, and nothing is overwritten with a blank. people: iterable of (email, first, last, display)."""
+    from sqlalchemy import text
+
+    engine = sql_engine()
+    if engine is None:
+        print("SQL_CONNECTION_STRING not set; name history NOT updated.")
+        return
+    merge = text("""
+        MERGE dbo.HIST_PersonNames AS t
+        USING (SELECT :email AS Email, :first AS FirstName, :last AS LastName) AS s
+           ON t.Email = s.Email AND ISNULL(t.FirstName, '') = ISNULL(s.FirstName, '') AND ISNULL(t.LastName, '') = ISNULL(s.LastName, '')
+        WHEN MATCHED THEN UPDATE SET
+             LastSeen = CASE WHEN t.LastSeen < :seen THEN :seen ELSE t.LastSeen END,
+             FirstSeen = CASE WHEN t.FirstSeen > :seen THEN :seen ELSE t.FirstSeen END,
+             DisplayName = COALESCE(NULLIF(:display, ''), t.DisplayName),
+             Sources = CASE WHEN t.Sources LIKE '%' + :source + '%' THEN t.Sources ELSE t.Sources + ';' + :source END
+        WHEN NOT MATCHED THEN INSERT (Email, FirstName, LastName, DisplayName, FirstSeen, LastSeen, Sources)
+             VALUES (:email, :first, :last, NULLIF(:display, ''), :seen, :seen, :source);""")
+    count = 0
+    with engine.begin() as conn:
+        conn.execute(text("""
+            IF OBJECT_ID('dbo.HIST_PersonNames') IS NULL
+            CREATE TABLE dbo.HIST_PersonNames (Email NVARCHAR(255) NOT NULL, FirstName NVARCHAR(255) NULL,
+                LastName NVARCHAR(255) NULL, DisplayName NVARCHAR(255) NULL, FirstSeen DATE NOT NULL,
+                LastSeen DATE NOT NULL, Sources NVARCHAR(400) NOT NULL)"""))
+        for email, first, last, display in people:
+            email = (email or "").strip().lower()
+            if not email or not ((first or "").strip() or (last or "").strip() or (display or "").strip()):
+                continue
+            conn.execute(merge, {"email": email, "first": (first or "").strip() or None, "last": (last or "").strip() or None,
+                                 "display": (display or "").strip(), "seen": run_date, "source": source})
+            count += 1
+    print(f"Name history: {count} names recorded in HIST_PersonNames.")
+
+
+def record_supervisors(rows, run_date):
+    from sqlalchemy import text
+
+    engine = sql_engine()
+    if engine is None:
         print("SQL_CONNECTION_STRING not set; supervisor history NOT updated.")
         return
-    if "://" in url:
-        engine = create_engine(url)
-    else:  # a raw ODBC connection string, as the other scripts also accept
-        engine = create_engine("mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(url))
     merge = text("""
         MERGE dbo.HIST_Supervisors AS t
         USING (SELECT :user AS UserEmail, :mgr AS ManagerEmail) AS s
@@ -267,9 +320,7 @@ def record_supervisors(rows, run_date):
         for row in rows:
             if not row["ManagerEmail"]:
                 continue
-            user = row["Username"].strip().lower()
-            if suffix and user.endswith(suffix.lower()):
-                user = user[: -len(suffix)]
+            user = member_key(row["Username"], suffix)
             conn.execute(merge, {"user": user, "mgr": row["ManagerEmail"].strip().lower(),
                                  "mdept": row["ManagerDepartment"], "udept": row["UserDepartment"],
                                  "seen": run_date})
@@ -333,12 +384,12 @@ def main():
 
     # 3. Supervisor and groups for every matched account.
     ids = {user["id"] for user, _ in found.values()}
-    manager_specs = {f"m{uid}": {"url": f"/users/{uid}/manager?$select=mail,department"} for uid in ids}
+    manager_specs = {f"m{uid}": {"url": f"/users/{uid}/manager?$select=mail,department,displayName,givenName,surname"} for uid in ids}
     group_specs = {f"g{uid}": {"url": f"/users/{uid}/memberOf?$select=id&$top=999"} for uid in ids}
     extra = run_all(auth, {**manager_specs, **group_specs}, args.workers, "supervisors and groups")
 
     run_date = date.today()
-    rows, errors = [], []
+    rows, errors, names = [], [], []
     for i, member in enumerate(members):
         emails = tried[i]
         row = {"Username": member.get("Username", ""), "Email": member.get("Email", ""), "Name": member.get("Name", ""),
@@ -360,6 +411,9 @@ def main():
                 "ManagerDepartment": (m_body.get("department") or "") if m_status == 200 else "",
                 "Groups": ", ".join(g["id"] for g in groups),   # never cut: a dropped affiliation group reads as "departed"
             })
+            names.append((member_key(row["Username"], suffix), user.get("givenName"), user.get("surname"), user.get("displayName")))
+            if m_status == 200 and m_body.get("mail"):
+                names.append((m_body["mail"], m_body.get("givenName"), m_body.get("surname"), m_body.get("displayName")))
         rows.append(row)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_csv_path)), exist_ok=True)
@@ -378,6 +432,7 @@ def main():
 
     if not args.no_history:
         record_supervisors(rows, run_date)
+        record_names(names, run_date, "TAMU_AGOL_EntraID.py")
 
 
 if __name__ == "__main__":
