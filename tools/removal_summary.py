@@ -4,8 +4,9 @@ Reads the catalog database (current member and item report tables, DeleteStatus,
 the changes file of a delete-status DRY RUN, applies those changes to get each member's projected status,
 and sorts members into the removal groups of the process:
 
-  1. Empty accounts      owns no items; projected status 2. No backup needed (nothing to back up, and an
-                         SSO account is recreated at its next login).
+  1. Empty accounts      owns no items, projected status 2, NetID (SSO) login, owns no groups. No backup
+                         needed (nothing to back up, and an SSO account is recreated at its next login).
+                         Empty ArcGIS-login accounts and group owners are listed for review instead.
   2. Status 2, content   flagged 30+ days, or left with nothing kept; removable once the backup is verified.
   3. Status 1, content   newly flagged; reaches status 2 after 30 days, then as group 2.
   Administrators and other non-standard roles found in any group are listed for review, never counted as
@@ -59,7 +60,7 @@ def main():
     engine = engine_from_env()
     with engine.connect() as c:
         members_table, items_table = newest(c, "OrganizationMembers[_]20%"), newest(c, "OrganizationItems[_]20%")
-        members = pd.read_sql(text(f"SELECT [Username], [Role], [Login Type], [Last Login Date], [Date Created] FROM dbo.[{members_table}]"), c)
+        members = pd.read_sql(text(f"SELECT [Username], [Role], [Login Type], [Last Login Date], [Date Created], [# of Groups Owned] AS groups_owned FROM dbo.[{members_table}]"), c)
         items = pd.read_sql(text(f"SELECT [Item ID], [Title], [Item Type], [Owner], [Share Level], [# of Groups shared with], "
                                  f"[Date Last Viewed], [Feature Storage Size], [File Storage Size], [In Recycle Bin] FROM dbo.[{items_table}]"), c)
         status = pd.read_sql(text("SELECT Username, DeleteStatus, Override FROM dbo.DeleteStatus"), c)
@@ -94,7 +95,9 @@ def main():
         if row["Role"] not in STANDARD_ROLES and row["projected_status"] in (1, 2):
             return "Review: administrator or non-standard role"
         if row["projected_status"] == 2 and row["items"] == 0:
-            return "1. Empty accounts (no backup needed)"
+            if row["Login Type"] == "enterprise" and (pd.to_numeric(row["groups_owned"], errors="coerce") or 0) == 0:
+                return "1. Empty accounts (no backup needed)"
+            return "Review: empty account with an ArcGIS login or groups owned"
         if row["projected_status"] == 2:
             return "2. Status 2 with content (after the backup is verified)"
         if row["projected_status"] == 1:
@@ -126,7 +129,7 @@ def main():
 
     columns = ["Username", "Role", "Login Type", "Last Login Date", "projected_status", "items", "feature_gb", "file_gb"] + (["last_supervisor"] if supervisors is not None else [])
     for name, prefix in (("review_empty_accounts.csv", "1."), ("review_status2_owners.csv", "2."),
-                         ("review_status1_owners.csv", "3."), ("review_admins_and_roles.csv", "Review")):
+                         ("review_status1_owners.csv", "3."), ("review_admins_roles_and_other_empty.csv", "Review")):
         members[members["group"].str.startswith(prefix)].sort_values("feature_gb", ascending=False)[columns].to_csv(os.path.join(args.out, name), index=False)
     status2 = set(members.loc[members["group"].str.startswith("2."), "key"])
     items[items["owner_key"].isin(status2)].drop(columns=["owner_key"]).to_csv(os.path.join(args.out, "review_status2_items.csv"), index=False)

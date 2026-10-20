@@ -98,17 +98,20 @@ def collect_entraid_table_name():
     return entraid_table_name
 
 def get_empty_users(member_table_name, item_table_name):
-    """This function queries the AGOL catalog database to find all users that have 0 items published.
+    """Users who own no items, sign in with a NetID (enterprise login) and own no groups: the empty accounts
+    that may go straight to status 2 once the lookup shows the person has left.
     Returns:
-        empty_users (list): A list of usernames that have 0 items published.
+        empty_users (list): usernames meeting all three conditions.
     """
-    print('Querying database for users with 0 items published...')
+    print('Querying database for empty NetID accounts that own no groups...')
 
     query = f"""
     SELECT m.Username
     FROM {member_table_name} m
     LEFT JOIN {item_table_name} i ON m.Username = i.Owner
     WHERE i.[Item ID] IS NULL
+      AND m.[Login Type] = 'enterprise'
+      AND ISNULL(m.[# of Groups Owned], 0) = 0
     """
     with engine.connect() as connection:
         result = connection.execute(text(query))
@@ -161,11 +164,12 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
 
     Rules, applied to every member on every run (2 October 2026 rewrite, register AGOL-024):
       - Override set                         -> 0
-      - owns nothing (empty account)         -> 2; FlagDate kept from the first time
+      - no row in the lookup at all          -> unchanged. Missing data is not evidence of leaving.
       - found in a current-affiliation group -> 0, at ANY earlier status. Before the rewrite only
         status-0 members were checked, so a wrong flag could never clear and a flagged member moved
         to 2 after 30 days whatever Entra said by then.
-      - no row in the lookup at all          -> unchanged. Missing data is not evidence of leaving.
+      - left, owns nothing, NetID login, owns no groups -> 2 at once; FlagDate kept from the first time
+        (20 October 2026; until then every empty account went to 2 whatever the person's affiliation)
       - otherwise (not current): 0 -> 1 (flagged); 1 for 30+ days -> 2; else unchanged.
 
     Every change is written to reports/DeleteStatus_changes_<date>.csv. The run refuses to save if
@@ -203,17 +207,19 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
         if row.Override:
             set_status(row.Index, row, 0, "override", None, None)
 
-        # Empty accounts are removed whatever their affiliation: they hold nothing, and an SSO
-        # account is recreated at its next login.
-        elif username in empty_users:
-            first_flag = row.FlagDate if row.DeleteStatus == 2 and not pd.isna(row.FlagDate) else CURRENT_DATE
-            set_status(row.Index, row, 2, "owns nothing", first_flag)
-
         elif entra is None:
             continue
 
         elif entra[0] == 1 and entra[1] & whitelisted_group_ids:
             set_status(row.Index, row, 0, "current affiliation", None, None)
+
+        # Empty accounts of people who have left go straight to 2 only when they sign in with a NetID
+        # (recreated at the next sign-in) and own no groups (AGOL refuses to delete a group owner). Dan,
+        # 20 October 2026: current people's empty accounts are kept; empty ArcGIS-login accounts and group
+        # owners take the normal 30-day flag. empty_users holds only accounts meeting both conditions.
+        elif username in empty_users:
+            first_flag = row.FlagDate if row.DeleteStatus == 2 and not pd.isna(row.FlagDate) else CURRENT_DATE
+            set_status(row.Index, row, 2, "owns nothing (left, NetID login, no groups)", first_flag)
 
         elif row.DeleteStatus == 0:
             set_status(row.Index, row, 1, "not found in Entra" if entra[0] == 0 else "no current-affiliation group",
