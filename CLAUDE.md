@@ -90,7 +90,9 @@ Graph is called from Python for identity, and DuckDB holds the catalog and queri
 - GEO Jobe stays the item-delete tool until the API deleter is proven.
 
 Run Python with ArcGIS Pro's interpreter (`arcgispro-py3`), which has `arcgis`. The Python on
-`PATH` does not. Pro must be signed in to the organization as an administrator for `GIS("home")`.
+`PATH` does not. Scripts sign in to ArcGIS Online only as the read-only service account (`.env`), never
+with Pro's own sign-in on their own: `agol_db.agol_gis()` refuses without the service account's settings, and
+only a tool run deliberately may ask for the administrator sign-in (`personal=True`).
 
 ## The hosted site
 
