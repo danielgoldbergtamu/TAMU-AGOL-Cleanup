@@ -10,6 +10,7 @@
 #   AGOL_REPORTS_DIR  run folders and report files  (default reports/)
 #   AGOL_CONFIG_DIR   reviewed lookup tables: department-to-unit, degree-to-department, college-level names
 #                     (default private/config/; organization data, so never in the public repository)
+#   AGOL_OUTPUT_DIR   built dashboards and their data, for the web app (default data/)
 
 import os
 import re
@@ -30,6 +31,10 @@ def reports_dir():
 
 def config_dir():
     return os.environ.get("AGOL_CONFIG_DIR") or os.path.join(SCRIPT_DIR, "private", "config")
+
+
+def output_dir():
+    return os.environ.get("AGOL_OUTPUT_DIR") or os.path.join(SCRIPT_DIR, "data")
 
 
 def connect(read_only=False, path=None):

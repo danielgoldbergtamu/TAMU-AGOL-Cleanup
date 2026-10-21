@@ -1,0 +1,700 @@
+<meta charset="utf-8">
+<title>AGOL Cleanup Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky section bar; each section a panel of headline figures, one chart and its table. */
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1b1d1c; --ink-2: #555a57; --ink-3: #7c817e; --line: #e2e4e1;
+  --maroon: #500000; --current: #2a78d6; --departed: #eb6834; --limit: #9b1c1c; --ok: #2f6b3f; --warn: #8a5a00;
+  --sans: "Public Sans", "Segoe UI", system-ui, sans-serif; --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161817; --panel: #1e2120; --ink: #f2f3f1; --ink-2: #c3c7c4; --ink-3: #969b98; --line: #343836;
+  --maroon: #e7a3a3; --current: #3987e5; --departed: #d95926; --limit: #f19a9a; --ok: #8fd19e; --warn: #e6b65c; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161817; --panel: #1e2120; --ink: #f2f3f1; --ink-2: #c3c7c4; --ink-3: #969b98; --line: #343836;
+  --maroon: #e7a3a3; --current: #3987e5; --departed: #d95926; --limit: #f19a9a; --ok: #8fd19e; --warn: #e6b65c; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 14.5px/1.55 var(--sans); }
+.wrap { max-width: 1680px; margin: 0 auto; padding-inline: clamp(16px, 2.5vw, 40px); padding-block: 24px 64px; display: grid; gap: 22px; }
+header h1 { font-size: 1.7rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.eyebrow { color: var(--maroon); font-weight: 600; font-size: .76rem; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 4px; }
+.sub { color: var(--ink-2); margin: 6px 0 0; max-width: 80ch; }
+.badge { display: inline-block; font-size: .72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; border: 1px solid currentColor; margin-left: 8px; vertical-align: 4px; }
+.badge.full { color: var(--limit); } .badge.published { color: var(--ok); }
+nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line); padding-block: 8px; display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: .86rem; }
+nav a { color: var(--ink-2); text-decoration: none; padding: 2px 0; }
+nav a:hover, nav a:focus-visible { color: var(--ink); text-decoration: underline; }
+nav a.active { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--maroon); }
+nav { padding-block: 10px; } nav a { padding: 4px 2px; }
+section.panel { background: var(--panel); border: 1px solid var(--line); padding: 18px; min-width: 0; scroll-margin-top: 56px; }
+h2 { font-size: 1.15rem; margin: 0 0 4px; }
+.lede { color: var(--ink-2); margin: 0 0 14px; max-width: 85ch; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.tile { border: 1px solid var(--line); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+.tile .l { color: var(--ink-2); font-size: .8rem; } .tile .v { font-family: var(--mono); font-size: 1.45rem; font-weight: 500; } .tile .n { color: var(--ink-3); font-size: .78rem; }
+.tile.over .v { color: var(--limit); } .tile.good .v { color: var(--ok); }
+.num, td.n, th.n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 10px; font-size: .85rem; color: var(--ink-2); }
+select { font: inherit; padding: 3px 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }
+.legend { display: flex; gap: 14px; margin-left: auto; } .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--ink-2); font: 12px var(--sans); } .chart text.val { fill: var(--ink); font: 11.5px var(--mono); }
+.chart .grid { stroke: var(--line); } .chart .limit { stroke: var(--limit); stroke-dasharray: 4 3; stroke-width: 1.5; } .chart text.limit-l { fill: var(--limit); }
+.chart g.row:hover rect.hit, .chart g.row:focus rect.hit { fill: var(--line); opacity: .55; } .chart g.row:focus { outline: none; }
+.tw { overflow-x: auto; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+th, td { padding: 6px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { color: var(--ink-2); font-weight: 600; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+td.n, th.n { text-align: right; white-space: nowrap; } td.wtext { min-width: 12ch; overflow-wrap: anywhere; }
+tr.unit td:first-child { font-weight: 600; }
+tr.subrow td { color: var(--ink-2); font-size: .82rem; } tr.subrow td:first-child { padding-left: 30px; } tr.subrow.degree td:first-child { padding-left: 56px; } tr.subrow.degree td { font-size: .78rem; }
+.pill { display: inline-block; font-size: .74rem; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); white-space: nowrap; }
+.pill.current, .pill.kept { color: var(--ok); border-color: currentColor; }
+.pill.flagged, .pill.no-current-affiliation { color: var(--warn); border-color: currentColor; }
+.pill.listed-for-removal, .pill.not-in-entra { color: var(--limit); border-color: currentColor; }
+.crumbs { font-size: .86rem; color: var(--ink-2); margin: 0 0 6px; } .crumbs a { color: var(--current); }
+a.u { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; } a.u:hover, a.u:focus-visible { color: var(--current); text-decoration-color: currentColor; }
+a.small { font-size: .78rem; font-weight: 400; margin-left: 8px; color: var(--current); }
+.chart g.row.link { cursor: pointer; }
+tr.dept .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em; display: inline-block; } tr.dept .toggle:focus-visible { outline: 2px solid var(--current); }
+tr.unit .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em; display: inline-block; } tr.unit .toggle:focus-visible { outline: 2px solid var(--current); }
+.tw.tall { max-height: 75vh; overflow-y: auto; } .tw.tall th { position: sticky; top: 0; background: var(--panel); }
+th.sortable { cursor: pointer; } th.sortable:hover { color: var(--ink); }
+.keybox { border: 1px solid var(--line); padding: 8px 12px; margin: 0 0 14px; font-size: .84rem; }
+.keybox summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
+.keycols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 6px 24px; margin-top: 8px; }
+.keybox h4 { margin: 4px 0 6px; font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); }
+.keybox dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 10px; margin: 0; } .keybox dd { margin: 0; color: var(--ink-2); }
+.pill[title] { cursor: help; }
+.statuses { border: 1px solid var(--line); padding: 12px 14px; margin-bottom: 16px; }
+.statuses h3 { margin-top: 0; }
+.statuses dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 0; }
+.statuses dt { padding-top: 1px; } .statuses dd { margin: 0; max-width: 85ch; }
+@media (max-width: 520px) { .statuses dl { grid-template-columns: 1fr; } .statuses dd { margin-bottom: 6px; } }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; } .grid2 > div { min-width: 0; }
+h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .note { color: var(--ink-2); font-size: .84rem; margin: 10px 0 0; max-width: 85ch; } span.small { font-size: .78rem; }
+#tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bg); padding: 7px 10px; border-radius: 4px; font-size: .8rem; line-height: 1.4; max-width: 300px; z-index: 9; }
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">Texas A&amp;M ArcGIS Online cleanup</p>
+  <h1>System status, units and proposed removals <span class="badge" id="edition"></span></h1>
+  <p class="sub" id="asof"></p>
+</header>
+<nav aria-label="Sections">
+  <a href="#overview">Overview</a><a href="#removals">Proposed removals</a><a href="#review">Review</a><a href="#units">Colleges and departments</a>
+  <a href="#items">Largest layers</a><a href="#users">Largest owners</a><a href="#changes">Changes</a>
+  <a href="#content">Content</a><a href="#accounts">Accounts</a><a href="#people">Multi-Account Holders</a><a href="#quality">Data quality</a><a href="#runs">Runs</a>
+</nav>
+
+<section class="panel" id="unitview" hidden aria-live="polite">
+  <p class="crumbs" id="uv-crumbs"></p>
+  <h2 id="uv-title"></h2><p class="lede" id="uv-lede"></p>
+  <div class="tiles" id="uv-tiles"></div>
+  <h3>Current accounts</h3><p class="note">People who have left are mostly counted under "Unit unknown", because a unit is rarely recorded for them, so this view shows current accounts without a share of the unit's members.</p>
+  <div class="tiles" id="uv-curtiles"></div>
+  <h3>Proposed removals in this unit (by owner) <a class="small" href="#status-key">what the statuses mean</a></h3><div class="tw" id="uv-removal"></div>
+  <div id="uv-subs-block"><h3 id="uv-subs-h">Departments</h3><p class="note">▸ opens a department to its degrees; select a name to open its view. A department includes its staff and the students in the degrees it offers.</p>
+    <div class="chart" id="uv-subchart"></div><div class="tw" id="uv-subtable"></div></div>
+  <h3>Feature storage by run</h3><div class="tw" id="uv-trend"></div>
+  <h3>Largest layers</h3><div class="tw" id="uv-items"></div>
+  <h3>Largest owners</h3><div class="tw" id="uv-users"></div>
+  <div class="grid2"><div><h3>Members by Entra classification</h3><div class="tw" id="uv-classes"></div></div>
+    <div><h3>Feature storage by item type</h3><div class="tw" id="uv-types"></div></div></div>
+  <h3>Last viewed</h3><div class="tw" id="uv-viewed"></div>
+</section>
+
+<section class="panel" id="overview"><h2>Overview</h2><p class="lede">Feature storage and accounts against the license limits, and how they have moved between runs.</p>
+  <div class="tiles" id="tiles"></div>
+  <h3>Current accounts</h3><p class="note">Current: found in Entra with a current TAMU affiliation (enrolled student, employee, faculty, instructor or student worker). These are the accounts the dry run keeps.</p>
+  <div class="tiles" id="curtiles"></div>
+  <div class="grid2"><div><h3>Feature storage by run</h3><div class="chart" id="trend"></div></div><div><h3>Members by Entra classification</h3><div class="tw" id="classes"></div></div></div>
+</section>
+
+<section class="panel" id="removals"><h2>Proposed removals</h2>
+  <p class="lede">From this run's delete-status dry run. <b>Proposals for review only.</b> Nothing is removed until the maintainer has reviewed a specific set and approved it in writing, and no content before a verified backup.</p>
+  <div class="statuses" id="status-key">
+    <h3>What the statuses mean</h3>
+    <dl>
+      <dt><span class="pill kept">0 · kept</span></dt>
+      <dd>The person is current: Entra places them in a current-affiliation group (enrolled student, employee, faculty, instructor), or their account has an override. Nothing happens to the account.</dd>
+      <dt><span class="pill flagged">1 · flagged</span></dt>
+      <dd>The person is no longer current: not found in Entra, or found with no current affiliation (for example a former student). The flag date starts a 30-day notice period, in which the owner, and their supervisor if one is on record, are to be told to collect their content. The pipeline does not send these notices yet.</dd>
+      <dt><span class="pill listed-for-removal">2 · listed for removal</span></dt>
+      <dd>Flagged for 30 days or more without becoming current again, or an account that owns nothing. Being listed is not removal: an account or its content is removed only after the maintainer has reviewed and approved that specific set, and content only after a verified backup.</dd>
+    </dl>
+    <p class="note">Every run re-checks every member: anyone found current again goes back to 0, whatever their status. <b>Projected status</b> is what this run's dry run would set; the stored status changes only on a real run, which has not been run yet.</p>
+  </div>
+  <div class="chart" id="path"></div><div class="tw" id="removal"></div>
+  <p class="note">Empty accounts need no backup (nothing to keep, and an SSO account is recreated at its next login). Status 2 content waits for the verified backup. Status 1 reaches status 2 after 30 days. Administrators and non-standard roles are listed for review and never counted as removable.</p>
+</section>
+
+<section class="panel" id="review"><h2>Review</h2>
+  <p class="lede">What to look at before approving anything: how concentrated current members' storage is, and the empty-account list with its cautions.</p>
+  <h3>Current members' storage</h3><p class="note" id="rv-gap"></p>
+  <div class="tw" id="rv-concentration"></div>
+  <h3>Current members by feature storage (top 150)</h3>
+  <p class="note">Running total in the "Cumulative" column. Neither earlier per-person quota figure (20 MB, 57 MB) is settled.</p>
+  <div class="tw" id="rv-top"></div>
+  <h3>Accounts that own nothing</h3>
+  <p class="note"><b>Group 1</b> (proposed for removal without a backup) is only the empty accounts of people who have <b>left</b>, with a <b>NetID login</b> and <b>no groups owned</b> (rule of 20 October 2026). Current people's empty accounts are kept; empty ArcGIS-login accounts and group owners take the normal 30-day flag. <b>Cautions:</b> an <b>ArcGIS login</b> account is not recreated at the next sign-in, the way a NetID account is; an account that <b>owns groups</b> cannot be deleted until the groups are reassigned; <b>current members</b> and anyone who <b>signed in within 90 days</b> are listed by the empty-account rule regardless of affiliation. Accounts with no caution are the cleanest first set.</p>
+  <div class="grid2"><div class="tw" id="rv-cautions"></div><div class="tw" id="rv-by"></div></div>
+  <div id="rv-list-block">
+    <div class="controls"><label for="rv-filter">Show <select id="rv-filter"><option value="group1">Group 1 only</option><option value="none">No caution only</option><option value="all">All</option>
+      <option value="ArcGIS">ArcGIS login</option><option value="owns groups">Owns groups</option><option value="current member">Current member</option><option value="signed in">Signed in within 90 days</option></select></label>
+      <label for="rv-q">Search <input id="rv-q" type="search" placeholder="name, unit, classification"></label><span>Showing <b id="rv-shown"></b></span></div>
+    <div class="tw tall" id="rv-list"></div>
+  </div>
+</section>
+
+<section class="panel" id="units"><h2>Colleges, agencies and departments</h2>
+  <p class="lede">Current members by college (students) or department (employees); departed members by the department last recorded for them, or a group their content is shared with.</p>
+  <div class="controls"><label for="metric">Measure <select id="metric"><option value="feature_gb">Feature storage (GB)</option><option value="file_gb">File storage (GB)</option><option value="members">Members</option><option value="items">Items</option></select></label>
+    <span class="legend"><span><span class="chip" style="background:var(--current)"></span>Current</span><span><span class="chip" style="background:var(--departed)"></span>Departed</span></span></div>
+  <div class="chart" id="unitchart"></div><h3>Colleges, departments and degrees (▸ opens a college to its departments, and a department to its degrees; select a name to open its view)</h3><div class="tw"><table id="unittable"></table></div>
+  <h3>Feature storage by unit and run</h3><div class="tw" id="unittrend"></div>
+</section>
+
+<section class="panel" id="items"><h2>Largest layers</h2><p class="lede">The 100 items using the most feature storage, with their owner's status and the owner's projected delete status (<a href="#status-key">what the statuses mean</a>).</p><div class="tw" id="topitems"></div></section>
+<section class="panel" id="users"><h2>Largest owners</h2><p class="lede">The 100 accounts holding the most feature storage, with each one's projected delete status (<a href="#status-key">what the statuses mean</a>).</p><div class="tw" id="topusers"></div></section>
+
+<section class="panel" id="changes"><h2>Changes since the previous run</h2><p class="lede" id="changes-lede"></p><div class="tw" id="changecounts"></div><div class="tw" id="changelist"></div></section>
+
+<section class="panel" id="content"><h2>Content</h2><p class="lede">What kind of content uses the storage, and how long since anyone viewed it.</p>
+  <div class="grid2"><div><h3>Feature storage by item type (top 12)</h3><div class="chart" id="types"></div></div><div><h3>Last viewed, by owner status (feature GB)</h3><div class="tw" id="viewed"></div></div></div></section>
+
+<section class="panel" id="accounts"><h2>Accounts</h2><p class="lede">How long since members last signed in, and the account mix.</p>
+  <div class="grid2"><div><h3>Last sign-in by classification</h3><div class="tw" id="logins"></div></div><div><h3>Roles and login types</h3><div class="tw" id="roles"></div></div></div></section>
+
+<section class="panel" id="acctview" hidden aria-live="polite">
+  <p class="crumbs"><a href="#users">Largest owners</a> &rsaquo; account</p>
+  <h2 id="av-title"></h2><p class="lede" id="av-lede"></p>
+  <div class="tiles" id="av-tiles"></div>
+  <h3>Details</h3><div class="tw" id="av-details"></div>
+  <div id="av-others-block"><h3>Other accounts of the same person</h3><div class="tw" id="av-others"></div></div>
+  <h3 id="av-items-h">Items</h3><p class="note">Select an item to open it in ArcGIS Online (sign-in needed).</p><div class="tw" id="av-items"></div></section>
+<section class="panel" id="changeview" hidden aria-live="polite">
+  <p class="crumbs"><a href="#changes">Changes</a> &rsaquo; accounts</p>
+  <h2 id="cv-title"></h2><p class="lede" id="cv-lede"></p>
+  <div class="tiles" id="cv-tiles"></div>
+  <p class="note">History: each account's Entra classification and projected delete status in every snapshot, oldest first. Select a column header to sort.</p>
+  <div class="tw" id="cv-table"></div></section>
+<section class="panel" id="groupview" hidden aria-live="polite">
+  <p class="crumbs"><a href="#removals">Proposed removals</a> &rsaquo; group</p>
+  <h2 id="gv-title"></h2><p class="lede" id="gv-lede"></p>
+  <div class="tiles" id="gv-tiles"></div>
+  <p class="note">Proposals for review only. Select a column header to sort; select a person to open their page where there is one.</p>
+  <div class="tw" id="gv-table"></div></section>
+<section class="panel" id="people"><h2>Multi-Account Holders</h2>
+  <p class="lede">Each account belongs to the person whose NetID it matched in Entra: an ArcGIS login with any username (a class or project account, for example) belongs to the person on its email. A person's accounts are assessed together: if the person is current, all their accounts are kept; if they have left, their flagged accounts reach status 2 together.</p>
+  <div class="tiles" id="pp-tiles"></div>
+  <h3>Current accounts among them</h3><p class="note">Accounts that are current themselves (found in Entra with a current affiliation). An account kept only because another account of the same person is current is not counted here.</p>
+  <div class="tiles" id="pp-curtiles"></div>
+  <h3>Current people with extra ArcGIS-login accounts (to consolidate)</h3><p class="note">Kept, not flagged. Ask the person to move the content into their NetID account.</p><div class="tw" id="pp-cons"></div>
+  <h3>Everyone with more than one account (largest 400 by storage)</h3><div class="tw" id="pp-all"></div></section>
+<section class="panel" id="quality"><h2>Data quality</h2><p class="lede">Gaps that affect the numbers above.</p><div class="tw" id="qualitytable"></div></section>
+<section class="panel" id="runs"><h2>Runs</h2><p class="lede">The most recent pipeline runs recorded in the database.</p><div class="tw" id="runtable"></div></section>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+const D = /*__DATA__*/null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// A person's name (full edition only, from Entra or the AGOL account) above their account or email.
+const ITEM_URL = "https://tamu.maps.arcgis.com/home/item.html?id=";
+const itemLink = (id, title) => id ? `<a href="${ITEM_URL}${encodeURIComponent(id)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title);
+const who = (id, none) => {
+  if (!id) return none ? `<span class="muted">${none}</span>` : "";
+  const key = String(id).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1");
+  const name = (D.names || {})[key], owner = (D.accounts || {})[key];
+  const belongs = owner ? `<br><span class="muted small">ArcGIS login of ${esc(owner)}</span>` : "";
+  const p = (D.person_of || {})[key];
+  const others = !p ? "" : key !== p ? `<br><a class="small" href="#people">one of ${(D.person_n || {})[p]} accounts of ${esc(p)}</a>`
+    : `<br><a class="small" href="#people">has ${(D.person_n || {})[p]} accounts</a>`;
+  const label = name ? `${esc(name)}<br><span class="muted small">${esc(id)}</span>` : esc(id);
+  const page = (D.acct || {})[String(id).trim().toLowerCase()] ? `<a href="#a:${encodeURIComponent(String(id).trim().toLowerCase())}">${label}</a>` : label;
+  return page + belongs + others;
+};
+// two decimals (0.01 GB = 10 MB) below 100 GB, one above, so small holdings are visible
+const gb = v => (v >= 100 ? (+v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : (+v).toFixed(2)) + " GB";
+const n = v => Math.round(+v).toLocaleString();
+const fmt = (m, v) => m.endsWith("_gb") ? gb(v) : n(v);
+const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+const DEFS = {
+  "current": "Owner status: found in Entra and in a current-affiliation group (enrolled student, employee, faculty, instructor or student worker).",
+  "no current affiliation": "Owner status: found in Entra but in no current-affiliation group; typically a former student or alumnus whose NetID still exists.",
+  "not in Entra": "Owner status: no Entra account found. The person has left, or the AGOL account is not tied to a NetID (an ArcGIS login with an outside email).",
+  "not looked up": "Owner status: no Entra lookup for this account yet (created after this run's lookup).",
+  "unknown": "Owner status: the owner is not in this run's member report.",
+  "kept": "Projected status 0: current, or has an override. Nothing happens to the account.",
+  "flagged": "Projected status 1: no longer current. Starts a 30-day notice period for the owner and their supervisor.",
+  "listed for removal": "Projected status 2: flagged 30+ days, or owns nothing. Removed only after the maintainer approves the set, and content only after a verified backup.",
+  "not assessed": "Projected status: a new account with no delete status yet; assessed on the next real run." };
+const pill = s => `<span class="pill ${slug(s)}"${DEFS[s] ? ` title="${esc(DEFS[s])}"` : ""}>${esc(s)}</span>`;
+function keyBox() {
+  const row = k => `<dt>${pill(k)}</dt><dd>${esc(DEFS[k].replace(/^(Owner status|Projected status( \d)?): /, ""))}</dd>`;
+  return `<details class="keybox" open><summary>Key: what the labels mean</summary><div class="keycols">
+    <div><h4>Owner status (Entra, this run)</h4><dl>${["current", "no current affiliation", "not in Entra", "not looked up"].map(row).join("")}</dl></div>
+    <div><h4>Projected delete status (this run's dry run)</h4><dl>${["kept", "flagged", "listed for removal", "not assessed"].map(row).join("")}</dl></div></div></details>`;
+}
+const NOT_UNITS = new Set(["Unit unknown", "Unmapped departments", "No unit recorded"]);
+
+/* Every table sorts by any column: select a header (again to reverse). Numbers sort high to low first, text A to Z;
+   blanks and "never" go last either way. A column sorts by its key, or else by the text it shows. */
+function cellText(html) { const d = document.createElement("div"); d.innerHTML = html; return d.textContent.trim(); }
+function sortValue(c, r) {
+  const raw = c.k !== undefined && !c.f ? r[c.k] : cellText(c.f ? c.f(r) : esc(r[c.k]));
+  if (raw === null || raw === undefined || raw === "" || /^(never|none on record|not recorded)$/i.test(String(raw))) return null;
+  if (c.n) { const v = parseFloat(String(raw).replace(/,/g, "")); return isNaN(v) ? null : v; }
+  return String(raw).toLowerCase();
+}
+function table(el, cols, rows, state) {
+  const box = $(el); if (!box) return;
+  const st = state || { col: -1, dir: 1 };
+  let shown = rows;
+  if (st.col >= 0) {
+    const c = cols[st.col], keyed = rows.map(r => [sortValue(c, r), r]);
+    keyed.sort((a, b) => a[0] === null ? (b[0] === null ? 0 : 1) : b[0] === null ? -1
+      : st.dir * (typeof a[0] === "number" ? a[0] - b[0] : a[0].localeCompare(b[0], undefined, { numeric: true })));
+    shown = keyed.map(x => x[1]);
+  }
+  box.innerHTML = `<table><thead><tr>${cols.map((c, i) => `<th class="sortable${c.n ? " n" : ""}" title="Sort by this column">${c.h}${i === st.col ? (st.dir === 1 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>${
+    shown.map(r => `<tr>${cols.map(c => `<td class="${c.n ? "n" : ""}${c.w ? " wtext" : ""}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  box.querySelectorAll("th").forEach((th, i) => th.onclick = () =>
+    table(el, cols, rows, { col: i, dir: i === st.col ? -st.dir : (cols[i].n ? -1 : 1) }));
+}
+function tip(e, html) { const t = $("#tip"); t.innerHTML = html; t.hidden = false; const x = e.clientX ?? e.target.getBoundingClientRect().left + 200, y = e.clientY ?? e.target.getBoundingClientRect().top;
+  t.style.left = Math.min(x + 14, innerWidth - t.offsetWidth - 8) + "px"; t.style.top = Math.max(8, Math.min(y + 14, innerHeight - t.offsetHeight - 8)) + "px"; }
+function untip() { $("#tip").hidden = true; }
+function ticks(max, k) { const st = Math.pow(10, Math.floor(Math.log10(max / k))), e = max / k / st, s = st * (e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1); const o = []; for (let v = 0; v <= max + 1e-9; v += s) o.push(v); return o; }
+
+/* Horizontal bars: rows [{label, a, b, tipHtml, muted}], a = current/blue, b = departed/orange (optional). */
+function hbars(el, rows, f, opt = {}) {
+  const box = $(el), W = Math.max(300, box.clientWidth || 600), narrow = W < 560;
+  const lw = opt.labelW ?? (narrow ? 140 : 280), vw = 70, rh = 25, bh = 14, pw = W - lw - vw;
+  const max = Math.max(opt.limit || 0, ...rows.map(r => (r.a || 0) + (r.b || 0)), 1), x = v => pw * v / max;
+  let y = 2, s = ""; const H = rows.length * rh + 30;
+  for (const t of ticks(max, narrow ? 3 : 5)) s += `<line class="grid" x1="${lw + x(t)}" x2="${lw + x(t)}" y1="0" y2="${H - 22}"/><text x="${lw + x(t)}" y="${H - 6}" text-anchor="middle">${f(t)}</text>`;
+  if (opt.limit) s += `<line class="limit" x1="${lw + x(opt.limit)}" x2="${lw + x(opt.limit)}" y1="0" y2="${H - 22}"/><text class="limit-l" x="${lw + x(opt.limit) + 4}" y="10">limit ${f(opt.limit)}</text>`;
+  rows.forEach((r, i) => {
+    const lab = r.label.length > (narrow ? 20 : 42) ? r.label.slice(0, narrow ? 19 : 41) + "…" : r.label, a = x(r.a || 0), b = x(r.b || 0), by = y + (rh - bh) / 2;
+    s += `<g class="row${r.href ? " link" : ""}" tabindex="0" data-i="${i}"${r.href ? ` role="link" aria-label="Open ${esc(r.label)}"` : ""}><rect class="hit" x="0" y="${y}" width="${W}" height="${rh}" fill="transparent"/>`
+      + `<text x="0" y="${y + rh / 2 + 4}"${r.muted ? ' font-style="italic"' : ""}><title>${esc(r.label)}</title>${esc(lab)}</text>`
+      + (a > 0 ? `<rect x="${lw}" y="${by}" width="${Math.max(a - (b > 0 ? 2 : 0), .5)}" height="${bh}" rx="${b > 0 ? 0 : 4}" fill="var(--current)"/>` : "")
+      + (b > 0 ? `<rect x="${lw + a}" y="${by}" width="${Math.max(b, .5)}" height="${bh}" rx="4" fill="var(--departed)"/>` : "")
+      + `<text class="val" x="${lw + a + b + 6}" y="${y + rh / 2 + 4}">${f((r.a || 0) + (r.b || 0))}</text></g>`;
+    y += rh;
+  });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${s}</svg>`;
+  box.querySelectorAll("g.row").forEach(g => { const r = rows[+g.dataset.i];
+    const show = e => tip(e, r.tipHtml || `<b>${esc(r.label)}</b><br>${f((r.a || 0) + (r.b || 0))}`);
+    g.addEventListener("mousemove", show); g.addEventListener("focus", show); g.addEventListener("mouseleave", untip); g.addEventListener("blur", untip);
+    if (r.href) { g.addEventListener("click", () => { untip(); location.hash = r.href; });
+      g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); untip(); location.hash = r.href; } }); } });
+}
+
+/* Unit and department views. */
+const SCOPES = D.scopes || {};
+const UNIT_KEY = {}, SUB_KEY = {}, DEG_KEY = {}, DEG_DEPT = {};
+for (const [k, s] of Object.entries(SCOPES)) {
+  if (s.kind === "unit") UNIT_KEY[s.unit] = k;
+  else if (s.kind === "degree") DEG_KEY[s.unit + "\u0001" + s.sub + "\u0001" + s.degree] = k;
+  else SUB_KEY[s.unit + "\u0001" + s.sub] = k;
+}
+const degreeLabel = g => { const nm = (D.degree_names || {})[g]; return nm ? `${g} (${nm})` : g; };
+/* Where a raw department-or-major value sits: [department, child], child a degree code or "Faculty & staff". */
+const placeOf = (u, s) => (D.placement || {})[u + "\u0001" + s] || [s, ""];
+const childKey = (u, d, g) => DEG_KEY[u + "\u0001" + d + "\u0001" + g];
+/* A department that appears in more than one college (e.g. Biological & Agricultural Engineering: staff in
+   Engineering, degrees in Agriculture) links each part to the others. */
+const NOT_COLLEGES = new Set(["Unmapped departments", "Unit unknown", "No unit recorded"]);
+const DEPT_UNITS = {};
+for (const s of Object.values(SCOPES)) if (s.kind === "sub" && s.sub !== "College-level" && s.sub !== "major not given" && !NOT_COLLEGES.has(s.unit)) (DEPT_UNITS[s.sub] = DEPT_UNITS[s.sub] || []).push(s.unit);
+const alsoIn = (u, d) => (DEPT_UNITS[d] || []).filter(x => x !== u).map(x => ` <a class="small" href="#${SUB_KEY[x + "\u0001" + d]}">also in ${esc(x)}</a>`).join("");
+const unitLink = u => UNIT_KEY[u] ? `<a class="u" href="#${UNIT_KEY[u]}">${esc(u)}</a>` : esc(u);
+/* A sub_unit is a department, or a degree code placed under its department (shown as "Department › CODE"). */
+const subLink = (u, s) => {
+  if (!s) return '<span class="muted">not recorded</span>';
+  const [d, g] = placeOf(u, s), dk = g ? childKey(u, d, g) : null;
+  if (dk && (g !== "Faculty & staff" || d !== s)) {
+    return `${SUB_KEY[u + "\u0001" + d] ? `<a class="u" href="#${SUB_KEY[u + "\u0001" + d]}">${esc(d)}</a>` : esc(d)} › <a class="u" href="#${dk}" title="${esc(degreeLabel(g))}">${esc(g === "Faculty & staff" ? s : g)}</a>`; }
+  const note = (D.degree_notes || {})[s], unconfirmed = note ? ` <span class="muted small">(degree: ${esc(note)})</span>` : "";
+  return (SUB_KEY[u + "\u0001" + s] ? `<a class="u" href="#${SUB_KEY[u + "\u0001" + s]}">${esc(s)}</a>` : esc(s)) + unconfirmed;
+};
+
+/* A college view's departments as a tree: ▸ opens a department to its degrees. Headers sort departments, and
+   the degrees within each, by that column. */
+function deptTree(sc, subs, st = { k: "total", dir: -1 }, open = new Set()) {
+  const val = (r, k) => k === "name" ? String(r.sub || "") : k === "total" ? r.current_gb + r.departed_gb : k === "degrees" ? (r.degrees || 0) : +r[k] || 0;
+  const order = (a, b) => st.k === "name" ? st.dir * val(a, "name").localeCompare(val(b, "name")) : st.dir * (val(a, st.k) - val(b, st.k));
+  const cols = [["name", "Department", ""], ["degrees", "Degrees", "n"], ["members", "Members", "n"], ["items", "Items", "n"],
+    ["current_gb", "Current", "n"], ["departed_gb", "Departed", "n"], ["total", "Total", "n"]];
+  const cells = r => `<td class="n">${r.degrees ? n(r.degrees) : ""}${r.staff ? `<span class="muted small"> + staff</span>` : ""}</td><td class="n">${n(r.members)}</td><td class="n">${n(r.items)}</td>`
+    + `<td class="n">${gb(r.current_gb)}</td><td class="n">${gb(r.departed_gb)}</td><td class="n">${gb(r.current_gb + r.departed_gb)}</td>`;
+  let h = `<table><thead><tr>${cols.map(([k, l, c], i) => `<th class="sortable ${c}" data-k="${k}" title="Sort by this column">${l}${st.k === k ? (st.dir === 1 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>`;
+  subs.slice().sort(order).forEach(d => {
+    const dk = SUB_KEY[sc.unit + "" + d.sub], degs = dk ? (SCOPES[dk].subs || []) : [], isOpen = open.has(d.sub);
+    const tog = degs.length ? `<button type="button" class="toggle" data-dept="${esc(d.sub)}" aria-expanded="${isOpen}" aria-label="Show degrees of ${esc(d.sub)}">${isOpen ? "▾" : "▸"}</button>` : '<span class="toggle"></span>';
+    const name = !d.sub ? '<span class="muted">not recorded</span>' : (dk ? `<a class="u" href="#${dk}">${esc(d.sub)}</a>` : esc(d.sub)) + (d.unconfirmed ? ` <span class="muted small">(degree: ${esc(d.unconfirmed)})</span>` : "");
+    h += `<tr class="unit dept-row"><td class="wtext">${tog}${name}${d.sub ? alsoIn(sc.unit, d.sub) : ""}</td>${cells(d)}</tr>`;
+    if (isOpen) degs.slice().sort(order).forEach(g => { const gk = childKey(sc.unit, d.sub, g.sub);
+      h += `<tr class="subrow degree"><td class="wtext">${gk ? `<a class="u" href="#${gk}">${esc(degreeLabel(g.sub))}</a>` : esc(degreeLabel(g.sub))}</td>${cells({ ...g, degrees: 0 })}</tr>`; });
+  });
+  const box = $("#uv-subtable"); box.innerHTML = h + "</tbody></table>";
+  box.querySelectorAll("th").forEach(th => th.onclick = () => { const k = th.dataset.k;
+    deptTree(sc, subs, { k, dir: st.k === k ? -st.dir : (k === "name" ? 1 : -1) }, open); });
+  box.querySelectorAll("button.toggle").forEach(b => b.onclick = () => { const d = b.dataset.dept;
+    if (open.has(d)) open.delete(d); else open.add(d); deptTree(sc, subs, st, open); });
+}
+
+function renderScope(sc) {
+  const isUnit = sc.kind === "unit", isDegree = sc.kind === "degree";
+  const deptLink = SUB_KEY[sc.unit + "\u0001" + sc.sub] ? `<a href="#${SUB_KEY[sc.unit + "\u0001" + sc.sub]}">${esc(sc.sub)}</a>` : esc(sc.sub);
+  $("#uv-crumbs").innerHTML = `<a href="#overview">Whole organization</a> › ` + (isUnit ? esc(sc.unit) : isDegree ? `${unitLink(sc.unit)} › ${deptLink} › ${esc(sc.degree)}` : `${unitLink(sc.unit)} › ${esc(sc.sub)}`);
+  const isStaff = isDegree && sc.degree === "Faculty & staff";
+  $("#uv-title").textContent = isUnit ? sc.unit : isStaff ? `${sc.sub}: faculty & staff` : isDegree ? degreeLabel(sc.degree) : sc.sub;
+  $("#uv-lede").textContent = isUnit ? "All departments, and the degrees under them, placed in this unit."
+    : isStaff ? (sc.sub === "College-level" ? `People who report to ${sc.unit} itself (dean's office and college administration), not to a department.` : `Faculty and staff of ${sc.sub}, ${sc.unit}: employees, and former employees whose department was recorded.`)
+    : isDegree ? `A degree program (major code ${sc.degree}) in ${sc.sub}, ${sc.unit}: its students.`
+    : sc.sub === "College-level" ? `${sc.unit} itself: its dean's office and college administration, and its college-wide degrees.` : `A department within ${sc.unit}: its faculty and staff, and the students in the degrees it offers.`;
+  const t = [["Feature storage", gb(sc.feature_gb), `${(100 * sc.feature_gb / D.total.feature_gb).toFixed(1)}% of the organization`],
+    ["Held by current members", gb(sc.current_gb), sc.feature_gb ? `${(100 * sc.current_gb / sc.feature_gb).toFixed(0)}% of this unit` : ""],
+    ["Held by departed members", gb(sc.departed_gb), ""], ["Members", n(sc.members), `${n(sc.current_members)} current`],
+    ["Items", n(sc.items), `${n(sc.owners)} owners`], ["File storage", gb(sc.file_gb), ""]];
+  if (sc.kind === "sub" && alsoIn(sc.unit, sc.sub)) $("#uv-lede").insertAdjacentHTML("beforeend", ` This department also appears in another college:${alsoIn(sc.unit, sc.sub)}.`);
+  $("#uv-tiles").innerHTML = t.map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  currentTiles("#uv-curtiles", sc.current_accounts, true);
+  table("#uv-removal", [{ h: "Group", k: "group", w: 1 }, { h: "Users", n: 1, f: r => n(r.users) }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }],
+    sc.removal.slice().sort((a, b) => a.group.localeCompare(b.group)));
+  const subs = sc.subs || [];
+  $("#uv-subs-block").hidden = isDegree || !subs.length;
+  $("#uv-subs-h").textContent = isUnit ? "Departments" : "Faculty & staff, and degrees";
+  if (!isDegree && subs.length) {
+    const key = s => isUnit ? SUB_KEY[sc.unit + "\u0001" + s] : childKey(sc.unit, sc.sub, s);
+    hbars("#uv-subchart", subs.slice(0, 30).map(s => ({ label: s.sub || "not recorded", a: s.current_gb, b: s.departed_gb, href: s.sub ? key(s.sub) : null,
+      tipHtml: `<b>${esc(s.sub || "not recorded")}</b><br>Current ${gb(s.current_gb)}<br>Departed ${gb(s.departed_gb)}<br>${n(s.items)} items` })), gb);
+    if (isUnit) deptTree(sc, subs);
+    else table("#uv-subtable", [{ h: isUnit ? "Department" : "Degree", f: r => !r.sub ? '<span class="muted">not recorded</span>'
+        : (key(r.sub) ? `<a class="u" href="#${key(r.sub)}">${esc(isUnit ? r.sub : degreeLabel(r.sub))}</a>` : esc(r.sub)) + (r.unconfirmed ? ` <span class="muted small">(degree: ${esc(r.unconfirmed)})</span>` : ""), w: 1 },
+      ...(isUnit ? [{ h: "Degrees", n: 1, f: r => r.degrees ? n(r.degrees) : "" }] : []),
+      { h: "Members", n: 1, f: r => n(r.members) }, { h: "Items", n: 1, f: r => n(r.items) },
+      { h: "Current", n: 1, f: r => gb(r.current_gb) }, { h: "Departed", n: 1, f: r => gb(r.departed_gb) }, { h: "Total", n: 1, f: r => gb(r.current_gb + r.departed_gb) }], subs);
+  }
+  table("#uv-trend", [{ h: "Run", k: "as_of" }, { h: "Current", n: 1, f: r => gb(r.current_gb) }, { h: "Departed", n: 1, f: r => gb(r.departed_gb) },
+    { h: "Total", n: 1, f: r => gb(r.current_gb + r.departed_gb) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.trend);
+  table("#uv-items", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner), w: 1 },
+    ...(isUnit ? [{ h: "Department or major", f: r => r.sub_unit ? subLink(sc.unit, r.sub_unit) : "", w: 1 }] : []),
+    { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
+    { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_items);
+  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user), w: 1 }, { h: "Classification", f: r => pill(r.classification) },
+    { h: "Department or major", k: "sub_unit", w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
+    { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_users);
+  table("#uv-classes", [{ h: "Classification", f: r => pill(r.classification) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.classes);
+  table("#uv-types", [{ h: "Item type", k: "type", w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }], sc.types);
+  const order = ["within 1 year", "1-2 years", "2-5 years", "over 5 years", "never viewed"];
+  table("#uv-viewed", [{ h: "Last viewed", k: "bucket" }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }],
+    sc.viewed.slice().sort((a, b) => order.indexOf(a.bucket) - order.indexOf(b.bucket)));
+}
+
+/* Review section. */
+function sortableTable(el, cols, rows) { table(el, cols, rows); }   // every table sorts now
+function review() {
+  const R = D.review; if (!R) return;
+  $("#rv-gap").innerHTML = `${n(R.current_owners)} current members own content, ${gb(R.current_gb)} in all. After every proposed removal, the organization would still be <b>${gb(Math.max(R.gap_gb, 0))}</b> over the ${D.limits.feature_gb} GB limit`
+    + (R.owners_for_gap ? `, and the top <b>${n(R.owners_for_gap)}</b> current ${R.owners_for_gap === 1 ? "owner holds" : "owners hold"} that much on their own.` : ".");
+  table("#rv-concentration", [{ h: "", k: "label" }, { h: "People", n: 1, f: r => n(r.people) }, { h: "Feature storage", n: 1, f: r => gb(r.feature_gb) },
+    { h: "Share of current", n: 1, f: r => (100 * r.feature_gb / R.current_gb).toFixed(1) + "%" }], R.concentration);
+  sortableTable("#rv-top", [{ h: "#", n: 1, k: "rank", sort: "rank" }, { h: "Account", f: r => who(r.user), w: 1, sort: "user" }, { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" },
+    { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1, sort: "sub_unit" }, { h: "Items", n: 1, f: r => n(r.items), sort: "items" },
+    { h: "Feature", n: 1, f: r => gb(r.feature_gb), sort: "feature_gb" }, { h: "Cumulative", n: 1, f: r => gb(r.cumulative_gb), sort: "cumulative_gb" },
+    { h: "Largest layer", k: "largest_item", w: 1, sort: "largest_item" }, { h: "Its size", n: 1, f: r => gb(r.largest_item_gb), sort: "largest_item_gb" },
+    { h: "Last sign-in", k: "last_login", sort: "last_login" }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1, sort: "supervisor" }], R.top_current.slice());
+  table("#rv-cautions", [{ h: "Caution", k: "caution", w: 1 }, { h: "Accounts", n: 1, f: r => n(r.accounts) }],
+    [{ caution: "In group 1 (proposed)", accounts: R.empty_group_1 }, ...R.empty_cautions, { caution: "No caution", accounts: R.empty_no_caution }, { caution: "All accounts that own nothing", accounts: R.empty_total }]);
+  const by = [...R.empty_by.classification.map(x => ({ k: "Classification: " + x.value, a: x.accounts })), ...R.empty_by.login_type.map(x => ({ k: "Login: " + x.value, a: x.accounts })),
+    ...R.empty_by.login_bucket.map(x => ({ k: "Last sign-in: " + x.value, a: x.accounts }))];
+  table("#rv-by", [{ h: "Breakdown", k: "k", w: 1 }, { h: "Accounts", n: 1, f: r => n(r.a) }], by);
+  if (!R.empty_list.length) { $("#rv-list-block").innerHTML = '<p class="note">The list of accounts names people, so it appears only in the full edition on the maintainer\'s machine.</p>'; return; }
+  const cols = [{ h: "Account", f: r => who(r.user), w: 1, sort: "user" }, { h: "In group 1", f: r => r.in_group_1 ? "yes" : "no", sort: "in_group_1" },
+    { h: "Projected status", f: r => pill(r.projected), sort: "projected" }, { h: "Classification", f: r => pill(r.classification), sort: "classification" }, { h: "Login", k: "login_type", sort: "login_type" },
+    { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>', sort: "last_login" }, { h: "Groups owned", n: 1, f: r => n(r.groups_owned), sort: "groups_owned" },
+    { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1, sort: "supervisor" }, { h: "Cautions", k: "cautions", w: 1, sort: "cautions" }];
+  const filter = () => { const f = $("#rv-filter").value, q = $("#rv-q").value.toLowerCase();
+    const rows = R.empty_list.filter(r => (f === "all" || (f === "group1" ? r.in_group_1 : f === "none" ? !r.cautions : r.cautions.includes(f))) && (!q || Object.values(r).join(" ").toLowerCase().includes(q)));
+    $("#rv-shown").textContent = n(rows.length); sortableTable("#rv-list", cols, rows); };
+  $("#rv-filter").onchange = filter; $("#rv-q").oninput = filter; filter();
+}
+
+/* One view at a time: each section is its own page, chosen from the section bar or a link (#review, #u3, ...). */
+const REDRAW = { overview: () => overview(), removals: () => removals(), units: () => units(), content: () => content() };
+function route() {
+  const h = decodeURIComponent(location.hash.slice(1)) || "overview";
+  if (h.startsWith("chg:") && D.change_rows) {
+    document.querySelectorAll("section.panel").forEach(s => { s.hidden = s.id !== "changeview"; });
+    document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#changes"));
+    renderChange(h.slice(4)); scrollTo(0, 0); return;
+  }
+  if (h.startsWith("grp:") && D.group_lists) {
+    document.querySelectorAll("section.panel").forEach(s => { s.hidden = s.id !== "groupview"; });
+    document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#removals"));
+    renderGroup(h.slice(4)); scrollTo(0, 0); return;
+  }
+  if (h.startsWith("a:") && (D.acct || {})[h.slice(2)]) {
+    document.querySelectorAll("section.panel").forEach(s => { s.hidden = s.id !== "acctview"; });
+    document.querySelectorAll("nav a").forEach(a => a.classList.remove("active"));
+    renderAccount(h.slice(2)); scrollTo(0, 0); return;
+  }
+  const sc = SCOPES[h];
+  const panels = [...document.querySelectorAll("section.panel")];
+  const inside = !sc && !panels.some(s => s.id === h) ? document.getElementById(h)?.closest("section.panel") : null;  // e.g. #status-key
+  const view = sc ? "unitview" : panels.some(s => s.id === h) ? h : inside ? inside.id : "overview";
+  panels.forEach(s => { s.hidden = s.id !== view; });
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + (sc ? "units" : view)));
+  if (sc) renderScope(sc); else if (REDRAW[view]) REDRAW[view]();
+  if (inside) document.getElementById(h).scrollIntoView(); else scrollTo(0, 0);
+}
+addEventListener("hashchange", route);
+
+/* Current accounts (overview, and each college and department view). */
+function currentTiles(el, C, inUnit) {
+  // In a college or department view the share of members is left out: a unit is known for nearly every current
+  // person but for few who have left (most of them are under "Unit unknown"), so it would read close to 100%.
+  $(el).innerHTML = !C ? "" : [["Current accounts", n(C.current), inUnit ? "in this unit" : `of ${n(C.members)} members (${C.members ? (100 * C.current / C.members).toFixed(0) : 0}%)`],
+    ["Sign in with a NetID", n(C.netid), `${n(C.arcgis)} use an ArcGIS login`], ["Own content", n(C.owning), "current accounts with items"],
+    ["Signed in, last 90 days", n(C.d90), `${n(C.d90_current)} of them current`], ["Signed in, last year", n(C.d365), `${n(C.d365_current)} of them current`],
+    ["Current, idle over a year", n(C.current_idle_year), "no sign-in in 365 days"]]
+    .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+}
+
+function overview() {
+  const t = D.total, L = D.limits, cl = Object.fromEntries(D.classes.map(c => [c.classification, c]));
+  const cur = (cl["current"]?.feature_gb || 0), rem = D.removal.filter(r => /^[12]\./.test(r.group)).reduce((a, r) => a + +r.feature_gb, 0);
+  const tiles = [["Feature storage", gb(t.feature_gb), `limit ${L.feature_gb} GB`, t.feature_gb > L.feature_gb ? "over" : "good"],
+    ["Accounts", n(t.accounts), `limit ${n(L.accounts)}`, t.accounts > L.accounts ? "over" : "good"],
+    ["Held by current members", gb(cur), `${(100 * cur / t.feature_gb).toFixed(0)}% of storage`, ""],
+    ["Proposed, once backup is verified", gb(rem), "status 2 and empty accounts", ""],
+    ["Items", n(t.items), `${n(t.owners)} owners`, ""], ["File storage", gb(t.file_gb), "not counted against the limit", ""]];
+  currentTiles("#curtiles", D.current_accounts);
+  $("#tiles").innerHTML = tiles.map(([l, v, nn, c]) => `<div class="tile ${c}"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  hbars("#trend", D.trend.map(r => ({ label: r.as_of, a: r.current_feature_gb, b: r.departed_feature_gb,
+    tipHtml: `<b>${r.as_of}</b><br>Current ${gb(r.current_feature_gb)}<br>Departed ${gb(r.departed_feature_gb)}<br>${n(r.accounts)} accounts` })), gb, { limit: L.feature_gb, labelW: 100 });
+  const order = ["current", "no current affiliation", "not in Entra", "not looked up"];
+  table("#classes", [{ h: "Classification", f: r => pill(r.classification) }, { h: "Accounts", k: "accounts", n: 1, f: r => n(r.accounts) },
+    { h: "Owners", n: 1, f: r => n(r.owners) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }], D.classes.sort((a, b) => order.indexOf(a.classification) - order.indexOf(b.classification)));
+}
+
+function removals() {
+  const t = D.total; const g = D.removal.slice().sort((a, b) => a.group.localeCompare(b.group));
+  table("#removal", [{ h: "Group", f: r => D.group_lists ? `<a class="u" href="#grp:${encodeURIComponent(r.group)}">${esc(r.group)}</a>` : esc(r.group), w: 1 },
+    { h: "Users", n: 1, f: r => n(r.users) }, { h: "Items", n: 1, f: r => n(r.items) },
+    { h: "Feature", n: 1, f: r => gb(+r.feature_gb) }, { h: "File", n: 1, f: r => gb(+r.file_gb) }], g);
+  const sum = p => D.removal.filter(r => p.test(r.group)).reduce((a, r) => a + +r.feature_gb, 0);
+  const s12 = sum(/^[12]\./), s3 = sum(/^3\./);
+  hbars("#path", [{ label: "Today", a: t.feature_gb }, { label: "After groups 1–2 (backup verified)", a: t.feature_gb - s12 },
+    { label: "After group 3 (30 days later)", a: t.feature_gb - s12 - s3 }], gb, { limit: D.limits.feature_gb, labelW: 230 });
+}
+
+function unitData(m) {
+  const by = new Map();
+  for (const r of D.units) { const u = by.get(r.unit) || { unit: r.unit, current: 0, departed: 0, subs: new Map() };
+    u[r.status] += +r[m]; const s = u.subs.get(r.sub_unit || "") || { sub: r.sub_unit || "", current: 0, departed: 0 }; s[r.status] += +r[m]; u.subs.set(r.sub_unit || "", s); by.set(r.unit, u); }
+  const list = [...by.values()].map(u => ({ ...u, total: u.current + u.departed }));
+  return [...list.filter(u => !NOT_UNITS.has(u.unit)).sort((a, b) => b.total - a.total), ...list.filter(u => NOT_UNITS.has(u.unit)).sort((a, b) => b.total - a.total)];
+}
+let UNIT_SORT = null;   // {k: "unit" | "current" | "departed" | "total", dir}; departments stay under their unit
+function units() {
+  const m = $("#metric").value, list = unitData(m), f = v => fmt(m, v);
+  if (UNIT_SORT) list.sort((a, b) => UNIT_SORT.k === "unit" ? UNIT_SORT.dir * a.unit.localeCompare(b.unit) : UNIT_SORT.dir * (a[UNIT_SORT.k] - b[UNIT_SORT.k]));
+  hbars("#unitchart", list.map(u => ({ label: u.unit, a: u.current, b: u.departed, muted: NOT_UNITS.has(u.unit), href: UNIT_KEY[u.unit],
+    tipHtml: `<b>${esc(u.unit)}</b><br>Current ${f(u.current)}<br>Departed ${f(u.departed)}<br>Total ${f(u.total)}` })), f);
+  const arrow = k => UNIT_SORT && UNIT_SORT.k === k ? (UNIT_SORT.dir === 1 ? " ▲" : " ▼") : "";
+  let h = `<thead><tr>${[["unit", "Unit", ""], ["current", "Current", "n"], ["departed", "Departed", "n"], ["total", "Total", "n"]]
+    .map(([k, label, cls]) => `<th class="sortable ${cls}" data-k="${k}" title="Sort by this column">${label}${arrow(k)}</th>`).join("")}</tr></thead><tbody>`;
+  list.forEach((u, i) => { h += `<tr class="unit" data-i="${i}"><td><button type="button" class="toggle" aria-expanded="false" aria-label="Show departments of ${esc(u.unit)}">▸</button>${unitLink(u.unit)}</td><td class="n">${f(u.current)}</td><td class="n">${f(u.departed)}</td><td class="n">${f(u.total)}</td></tr>`;
+    // departments, each followed by its degrees; both in the table's sort order (largest first by default)
+    const depts = new Map();
+    for (const s of u.subs.values()) {
+      const [dept, child] = placeOf(u.unit, s.sub), d = depts.get(dept) || { sub: dept, current: 0, departed: 0, degrees: [] };
+      d.current += s.current; d.departed += s.departed;
+      if (child) { const c = d.degrees.find(x => x.sub === child) || (d.degrees.push({ sub: child, current: 0, departed: 0 }), d.degrees[d.degrees.length - 1]);
+        c.current += s.current; c.departed += s.departed; c.total = c.current + c.departed; }
+      depts.set(dept, d);
+    }
+    const order = (a, b) => UNIT_SORT && UNIT_SORT.k === "unit" ? UNIT_SORT.dir * String(a.sub).localeCompare(String(b.sub))
+      : UNIT_SORT ? UNIT_SORT.dir * (a[UNIT_SORT.k] - b[UNIT_SORT.k]) : b.total - a.total;
+    [...depts.values()].map(d => ({ ...d, total: d.current + d.departed })).sort(order).slice(0, 60).forEach((d, j) => {
+      const dk = SUB_KEY[u.unit + "" + d.sub], note = (D.degree_notes || {})[d.sub];
+      const label = !d.sub ? '<span class="muted">not recorded</span>' : (dk ? `<a class="u" href="#${dk}">${esc(d.sub)}</a>` : esc(d.sub))
+        + (note ? ` <span class="muted small">(degree: ${esc(note)})</span>` : "") + (() => { const nd = d.degrees.filter(x => x.sub !== "Faculty & staff").length, st = d.degrees.some(x => x.sub === "Faculty & staff");
+          return nd || st ? ` <span class="muted small">${nd ? `${nd} degree${nd > 1 ? "s" : ""}` : ""}${nd && st ? " + " : ""}${st ? "faculty & staff" : ""}</span>` : ""; })();
+      const tog = d.degrees.length ? `<button type="button" class="toggle" aria-expanded="false" aria-label="Show degrees of ${esc(d.sub)}">▸</button>` : '<span class="toggle"></span>';
+      h += `<tr class="subrow dept" data-of="${i}" data-d="${i}-${j}" hidden><td>${tog}${label}${d.sub ? alsoIn(u.unit, d.sub) : ""}</td><td class="n">${f(d.current)}</td><td class="n">${f(d.departed)}</td><td class="n">${f(d.total)}</td></tr>`;
+      d.degrees.sort(order).forEach(g => { const gk = childKey(u.unit, d.sub, g.sub);
+        h += `<tr class="subrow degree" data-of="${i}" data-in="${i}-${j}" hidden><td>${gk ? `<a class="u" href="#${gk}">${esc(degreeLabel(g.sub))}</a>` : esc(degreeLabel(g.sub))}</td><td class="n">${f(g.current)}</td><td class="n">${f(g.departed)}</td><td class="n">${f(g.total)}</td></tr>`; });
+    }); });
+  $("#unittable").innerHTML = h + "</tbody>";
+  $("#unittable").querySelectorAll("th").forEach(th => th.onclick = () => {
+    const k = th.dataset.k; UNIT_SORT = { k, dir: UNIT_SORT && UNIT_SORT.k === k ? -UNIT_SORT.dir : (k === "unit" ? 1 : -1) }; units(); });
+  // a tree: a college opens to its departments, and a department to its degrees
+  const T = $("#unittable");
+  T.querySelectorAll("tr.unit button.toggle").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), o = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", o); b.textContent = o ? "▾" : "▸";
+    T.querySelectorAll(`tr.dept[data-of="${tr.dataset.i}"]`).forEach(r => { r.hidden = !o; const t2 = r.querySelector("button.toggle"); if (t2 && !o) { t2.setAttribute("aria-expanded", false); t2.textContent = "▸"; } });
+    if (!o) T.querySelectorAll(`tr.degree[data-of="${tr.dataset.i}"]`).forEach(r => r.hidden = true); }));
+  T.querySelectorAll("tr.dept button.toggle").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), o = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", o); b.textContent = o ? "▾" : "▸"; T.querySelectorAll(`tr.degree[data-in="${tr.dataset.d}"]`).forEach(r => r.hidden = !o); }));
+  const dates = [...new Set(D.unit_trend.map(r => r.as_of))].sort(), byUnit = new Map();
+  for (const r of D.unit_trend) { const u = byUnit.get(r.unit) || {}; u[r.as_of] = r.current_gb + r.departed_gb; byUnit.set(r.unit, u); }
+  const rows = [...byUnit.entries()].map(([unit, v]) => ({ unit, ...v, last: v[dates[dates.length - 1]] || 0 })).sort((a, b) => b.last - a.last);
+  table("#unittrend", [{ h: "Unit", k: "unit", w: 1 }, ...dates.map(d => ({ h: d, n: 1, f: r => r[d] === undefined ? "" : gb(r[d]) })),
+    ...(dates.length > 1 ? [{ h: "Change", n: 1, f: r => { const a = r[dates[dates.length - 2]], b = r[dates[dates.length - 1]]; return a === undefined || b === undefined ? "" : (b - a >= 0 ? "+" : "") + (b - a).toFixed(2) + " GB"; } }] : [])], rows);
+}
+
+function tops() {
+  table("#topitems", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner), w: 1 },
+    { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : "", w: 1 },
+    { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
+    { h: "Sharing", k: "share" }, { h: "Groups", n: 1, k: "groups" }, { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_items);
+  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user), w: 1 }, { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
+    { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
+    { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_users);
+}
+
+function changes() {
+  const prev = D.trend.length > 1 ? D.trend[D.trend.length - 2].as_of : null;
+  $("#changes-lede").textContent = prev ? `Between the snapshot of ${prev} and this one (${D.as_of}).` : "This is the first snapshot; changes appear from the next run.";
+  const chgKey = r => encodeURIComponent([r.kind, r.from, r.to].join("|"));
+  if (D.change_counts.length) table("#changecounts", [{ h: "What changed", f: r => D.change_rows ? `<a class="u" href="#chg:${chgKey(r)}">${esc(r.kind)}</a>` : esc(r.kind) }, { h: "From", f: r => pill(r.from) }, { h: "To", f: r => pill(r.to) },
+    { h: "Accounts", n: 1, f: r => n(r.accounts) }, { h: "Their feature storage", n: 1, f: r => gb(r.feature_gb) }], D.change_counts.sort((a, b) => b.accounts - a.accounts));
+  if (D.change_list.length) { $("#changelist").insertAdjacentHTML("beforebegin", "<h3>Accounts that changed (largest 300 by storage)</h3>");
+    table("#changelist", [{ h: "Account", f: r => who(r.username), w: 1 }, { h: "Was", f: r => pill(r.prev_classification) }, { h: "Now", f: r => pill(r.classification) },
+      { h: "Unit was", k: "prev_unit", w: 1 }, { h: "Unit now", k: "unit", w: 1 }, { h: "Status was", k: "prev_projected_status" }, { h: "Status now", k: "projected_status" },
+      { h: "Feature GB", n: 1, f: r => (+r.feature_gb).toFixed(2) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.change_list); }
+}
+
+function content() {
+  const ty = D.item_types.slice().sort((a, b) => b.feature_gb - a.feature_gb).slice(0, 12);
+  hbars("#types", ty.map(r => ({ label: r.type, a: r.feature_gb, tipHtml: `<b>${esc(r.type)}</b><br>${n(r.items)} items<br>Feature ${gb(r.feature_gb)}<br>File ${gb(r.file_gb)}` })), gb, { labelW: 170 });
+  const buckets = ["within 1 year", "1-2 years", "2-5 years", "over 5 years", "never viewed"], st = ["current", "departed", "unknown"];
+  table("#viewed", [{ h: "Last viewed", k: "b" }, ...st.map(s => ({ h: s, n: 1, f: r => gb(r[s] || 0) })), { h: "Items", n: 1, f: r => n(r.items) }],
+    buckets.map(b => { const o = { b, items: 0 }; D.viewed.filter(v => v.bucket === b).forEach(v => { o[v.status] = (o[v.status] || 0) + v.feature_gb; o.items += v.items; }); return o; }));
+}
+
+function accounts() {
+  const buckets = ["within 90 days", "90 days - 1 year", "1-2 years", "over 2 years", "never logged in"], cls = ["current", "no current affiliation", "not in Entra", "not looked up"];
+  table("#logins", [{ h: "Last sign-in", k: "b" }, ...cls.map(c => ({ h: c, n: 1, f: r => n(r[c] || 0) }))],
+    buckets.map(b => { const o = { b }; D.logins.filter(v => v.bucket === b).forEach(v => o[v.classification] = v.accounts); return o; }));
+  table("#roles", [{ h: "Role or login type", k: "k", w: 1 }, { h: "Accounts", n: 1, f: r => n(r.accounts) }],
+    [...D.roles.map(r => ({ k: "Role: " + r.role, accounts: r.accounts })), ...D.login_types.map(r => ({ k: "Login: " + r.login_type, accounts: r.accounts }))].sort((a, b) => b.accounts - a.accounts));
+}
+
+function renderAccount(key) {
+  const a = D.acct[key];
+  $("#av-title").innerHTML = (D.names || {})[key.replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1")] ? esc(D.names[key.replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1")]) : esc(a.user);
+  $("#av-lede").innerHTML = `${esc(a.user)} &middot; ${a.login === "arcgis" ? "ArcGIS login" : "NetID login"} &middot; ${pill(a.classification)} &middot; projected ${pill(a.projected)}`;
+  $("#av-tiles").innerHTML = [["Items", n(a.items), ""], ["Feature storage", gb(a.feature_gb), ""], ["File storage", gb(a.file_gb), ""], ["Groups owned", n(a.groups_owned), ""]]
+    .map(([k, v, s]) => `<div class="tile"><div class="l">${k}</div><div class="v">${v}</div><div class="n">${s}</div></div>`).join("");
+  const rows = [["Account", esc(a.user)], ["Email on the account", esc(a.email)], ["Belongs to (NetID)", a.person ? esc(a.person) : '<span class="muted">not tied to a NetID</span>'],
+    ["Login", a.login === "arcgis" ? "ArcGIS login" : "NetID (single sign-on)"], ["Role", esc(a.role)], ["Owner status (Entra)", pill(a.classification)],
+    ["Unit", unitLink(a.unit)], ["Department or major", a.sub_unit ? subLink(a.unit, a.sub_unit) : '<span class="muted">not recorded</span>'],
+    ["Supervisor", who(a.supervisor, "none on record")], ["Last sign-in", a.last_login || '<span class="muted">never</span>'],
+    ["Delete status now", esc(a.status)], ["Projected status (this run's dry run)", pill(a.projected)], ["Removal group", esc(a.group)]];
+  $("#av-details").innerHTML = `<table><tbody>${rows.map(([k, v]) => `<tr><th scope="row">${k}</th><td class="wtext">${v}</td></tr>`).join("")}</tbody></table>`;
+  const others = a.person ? Object.entries(D.acct).filter(([k, o]) => o.person === a.person && k !== key) : [];
+  $("#av-others-block").hidden = !others.length;
+  table("#av-others", [{ h: "Account", f: ([k, o]) => who(o.user), w: 1 }, { h: "Login", f: ([k, o]) => o.login === "arcgis" ? "ArcGIS login" : "NetID" },
+    { h: "Items", n: 1, f: ([k, o]) => n(o.items) }, { h: "Feature", n: 1, f: ([k, o]) => gb(o.feature_gb) }, { h: "Projected status", f: ([k, o]) => pill(o.projected) }], others);
+  const its = (D.acct_items || {})[key] || [];
+  $("#av-items-h").textContent = a.items > its.length ? `Items (largest ${n(its.length)} of ${n(a.items)})` : `Items (${n(its.length)})`;
+  table("#av-items", [{ h: "Item", f: x => itemLink(x[0], x[1]), w: 1 }, { h: "Type", f: x => esc(x[2]) }, { h: "Feature", n: 1, f: x => gb(x[3]) }, { h: "File", n: 1, f: x => gb(x[4]) },
+    { h: "Sharing", f: x => esc(x[5]) }, { h: "Last viewed", f: x => x[6] || '<span class="muted">never</span>' }, { h: "Created", f: x => esc(x[7]) }], its);
+}
+
+/* The accounts behind one row of the Proposed removals table. The summary's group names are matched to each
+   account's removal group (the builder's labels are shorter). */
+function renderChange(key) {
+  const [kind, from, to] = key.split("|"), isClass = kind === "classification";
+  const rows = (D.change_rows || []).filter(c => isClass ? c[1] === from && c[2] === to : c[3] === from && c[4] === to)
+    .map(c => ({ user: c[0], was: isClass ? c[1] : c[3], now: isClass ? c[2] : c[4], prev_unit: c[5], unit: c[6], feature_gb: c[7], items: c[8], supervisor: c[9] }));
+  $("#cv-title").innerHTML = `${esc(kind)}: ${pill(from)} → ${pill(to)}`;
+  const prev = D.trend.length > 1 ? D.trend[D.trend.length - 2].as_of : "";
+  $("#cv-lede").textContent = `${n(rows.length)} accounts whose ${kind} changed between the snapshot of ${prev} and this one (${D.as_of}).`;
+  const sum = k => rows.reduce((x, r) => x + (+r[k] || 0), 0);
+  $("#cv-tiles").innerHTML = [["Accounts", n(rows.length), ""], ["Items", n(sum("items")), ""], ["Feature storage", gb(sum("feature_gb")), ""]]
+    .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  const history = r => ((D.status_history || {})[String(r.user).toLowerCase()] || [])
+    .map(h => `<span class="muted small">${esc(h[0])}</span> ${pill(h[1])} ${pill(h[2])}`).join("<br>");
+  rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
+  table("#cv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Unit was", f: r => r.prev_unit ? unitLink(r.prev_unit) : "", w: 1 }, { h: "Unit now", f: r => unitLink(r.unit), w: 1 },
+    { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "History", f: history, w: 1 },
+    { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], rows);
+}
+
+function groupMatcher(label) {
+  const L = label.toLowerCase();
+  if (L.startsWith("1.")) return a => a[10].startsWith("1.");
+  if (L.startsWith("2.")) return a => a[10].startsWith("2.");
+  if (L.startsWith("3.") && L.includes("empty")) return a => a[10].startsWith("3.") && a[4] === 0;
+  if (L.startsWith("3.")) return a => a[10].startsWith("3.") && a[4] > 0;
+  if (L.startsWith("kept")) return a => a[10].startsWith("Kept");
+  if (L.startsWith("review: admin")) return a => a[10].startsWith("Review: admin");
+  if (L.startsWith("review: empty")) return a => a[10].startsWith("Review: empty");
+  if (L.startsWith("not yet")) return a => a[10].startsWith("Not yet");
+  return () => false;
+}
+function renderGroup(label) {
+  const rows = (D.group_lists || []).filter(groupMatcher(label)).map(a => ({ user: a[0], classification: a[1], unit: a[2], sub_unit: a[3], items: a[4],
+    feature_gb: a[5], file_gb: a[6], last_login: a[7], projected: a[8], supervisor: a[9], login: a[11] }));
+  const s = D.removal.find(r => r.group === label);
+  $("#gv-title").textContent = label;
+  $("#gv-lede").textContent = `${n(rows.length)} accounts` + (s && +s.users !== rows.length ? ` (the summary counts ${n(+s.users)}; the difference is accounts whose group the dashboard and the summary judge slightly differently)` : "");
+  const sum = k => rows.reduce((x, r) => x + (+r[k] || 0), 0);
+  $("#gv-tiles").innerHTML = [["Accounts", n(rows.length), ""], ["Items", n(sum("items")), ""], ["Feature storage", gb(sum("feature_gb")), ""], ["File storage", gb(sum("file_gb")), ""]]
+    .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
+  table("#gv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Login", f: r => r.login === "arcgis" ? "ArcGIS login" : "NetID" },
+    { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 },
+    { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
+    { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) },
+    { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], rows);
+}
+
+function peopleView() {
+  const P = D.people;
+  $("#pp-tiles").innerHTML = [["People with several accounts", n(P.people), `${n(P.accounts)} accounts`], ["Their feature storage", gb(P.feature_gb), ""],
+    ["Current, with extra ArcGIS logins", n(P.current_with_arcgis), `${n(P.consolidate_accounts)} accounts, ${gb(P.consolidate_gb)}`],
+    ["ArcGIS logins tied to a NetID", n(P.linked_arcgis), `of ${n(P.arcgis_total)}`]]
+    .map(([k, v, s]) => `<div class="tile"><div class="l">${k}</div><div class="v">${v}</div><div class="n">${s}</div></div>`).join("");
+  const acc = r => r.accounts.map(a => `${who(a.user)} <span class="muted small">(${a.login === "arcgis" ? "ArcGIS login" : "NetID"}, ${n(a.items)} items, ${gb(a.feature_gb)} feature, ${gb(a.file_gb || 0)} file, ${esc(a.projected)})</span>`).join("<br>");
+  const cols = [{ h: "#", n: 1, k: "rank" }, { h: "Person", f: r => who(r.person), w: 1 }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
+    { h: "Current", f: r => pill(r.current ? "current" : "no current affiliation") }, { h: "Accounts", n: 1, k: "n" }, { h: "Current accounts", n: 1, k: "n_current" }, { h: "ArcGIS logins", n: 1, k: "arcgis" },
+    { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
+    { h: "Total", n: 1, f: r => gb(r.feature_gb + r.file_gb) }, { h: "In extra ArcGIS logins", n: 1, f: r => r.consolidate ? gb(r.consolidate_gb) : "" },
+    { h: "Projected statuses", k: "statuses", w: 1 },
+    ...(D.edition === "full" ? [{ h: "Accounts (largest first)", f: acc, w: 1 }] : [])];
+  currentTiles("#pp-curtiles", P.current_accounts);
+  const first = $("#pp-curtiles .tile .n"); if (first && P.current_accounts) first.textContent = `of ${n(P.accounts)} accounts; ${n(P.current_people)} of ${n(P.people)} people are current`;
+  table("#pp-cons", cols, P.list.filter(r => r.consolidate));
+  table("#pp-all", cols, P.list);
+}
+
+function quality() {
+  table("#qualitytable", [{ h: "Gap", k: 0, f: r => esc(r[0]) }, { h: "Accounts", n: 1, f: r => n(r[1]) }, { h: "Their feature storage", n: 1, f: r => gb(r[2]) }], D.quality);
+  table("#runtable", [{ h: "Run", k: "run_id", w: 1 }, { h: "Kind", k: "kind" }, { h: "Status", f: r => pill(r.status === "succeeded" ? "kept" : r.status === "running" ? "flagged" : r.status === "failed" ? "listed for removal" : r.status).replace(/>[^<]*</, `>${esc(r.status)}<`) },
+    { h: "Started", f: r => esc((r.started_at || "").slice(0, 16)) }, { h: "Finished", f: r => esc((r.finished_at || "").slice(0, 16).replace("NaT", "")) }], D.runs);
+}
+
+$("#edition").textContent = D.edition === "full" ? "Full: names people, local only" : "People and layer titles hidden";
+$("#edition").className = "badge " + D.edition;
+$("#asof").textContent = `Data as of ${D.as_of}; built ${D.generated}. Sources: ${D.sources}.`;
+try { const m = localStorage.getItem("agol-dash-metric"); if (m) $("#metric").value = m; } catch (e) {}
+$("#metric").addEventListener("change", () => { try { localStorage.setItem("agol-dash-metric", $("#metric").value); } catch (e) {} units(); });
+for (const id of ["overview", "review", "items", "users", "changes", "unitview"]) {
+  const lede = document.querySelector(`#${id} .lede`); if (lede) lede.insertAdjacentHTML("afterend", keyBox());
+}
+overview(); removals(); review(); units(); tops(); changes(); content(); accounts(); peopleView(); quality(); route();
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(route, 150); });
+</script>
