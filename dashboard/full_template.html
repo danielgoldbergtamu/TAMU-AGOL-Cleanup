@@ -108,6 +108,8 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 
 <section class="panel" id="overview"><h2>Overview</h2><p class="lede">Feature storage and accounts against the license limits, and how they have moved between runs.</p>
   <div class="tiles" id="tiles"></div>
+  <div id="bin-block" hidden><h3>Recycle bin</h3><p class="note">Items in the ArcGIS Online recycle bin are left out of every total on this dashboard. Whether AGOL still counts them against the storage limit until they are deleted for good is not settled. Largest first.</p>
+    <div class="tiles" id="bintiles"></div><div class="tw" id="bintable"></div></div>
   <h3>Current accounts</h3><p class="note">Current: found in Entra with a current TAMU affiliation (enrolled student, employee, faculty, instructor or student worker). These are the accounts the dry run keeps.</p>
   <div class="tiles" id="curtiles"></div>
   <div class="grid2"><div><h3>Feature storage by run</h3><div class="chart" id="trend"></div></div><div><h3>Members by Entra classification</h3><div class="tw" id="classes"></div></div></div>
@@ -469,7 +471,19 @@ function currentTiles(el, C, inUnit) {
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
 }
 
+function recycleBin() {
+  const B = D.recycle_bin;
+  $("#bin-block").hidden = !B || !B.items;
+  if (!B || !B.items) return;
+  $("#bintiles").innerHTML = [["In the recycle bin", gb(B.feature_gb), `${n(B.items)} items, ${n(B.owners)} owners`], ["File storage in the bin", gb(B.file_gb), ""]]
+    .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  table("#bintable", [{ h: "Item", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" },
+    ...(D.edition === "full" ? [{ h: "Owner", f: r => who(r.owner), w: 1 }] : []), { h: "Owner's unit", f: r => unitLink(r.unit), w: 1 },
+    { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) }], B.list.slice(0, 50));
+}
+
 function overview() {
+  recycleBin();
   const t = D.total, L = D.limits, cl = Object.fromEntries(D.classes.map(c => [c.classification, c]));
   const cur = (cl["current"]?.feature_gb || 0), rem = D.removal.filter(r => /^[12]\./.test(r.group)).reduce((a, r) => a + +r.feature_gb, 0);
   const tiles = [["Feature storage", gb(t.feature_gb), `limit ${L.feature_gb} GB`, t.feature_gb > L.feature_gb ? "over" : "good"],

@@ -92,7 +92,11 @@ def main():
         entra_names = read("SELECT Email, FirstName, LastName, DisplayName, LastSeen FROM HIST_PersonNames") if db.exists(c, "HIST_PersonNames") else None
 
     now = pd.Timestamp(as_of)
-    items = items[~items["in_bin"].astype(str).str.strip().str.lower().isin(["yes", "true", "1"])].copy()
+    # Items in the AGOL recycle bin are left out of every total, and shown on their own (Dan, 21 October 2026):
+    # whether AGOL still counts them against the storage limit until they are deleted for good is not settled.
+    in_bin = items["in_bin"].astype(str).str.strip().str.lower().isin(["yes", "true", "1"])
+    binned = items[in_bin].copy()
+    items = items[~in_bin].copy()
     snap["key"] = snap["username"].str.strip().str.lower()
     items["key"] = items["owner"].str.strip().str.lower()
     members["key"] = members["Username"].str.strip().str.lower()
@@ -176,6 +180,17 @@ def main():
                 acct_items[k] = [[x.item_id, x.title, x.item_type, r(x.feature_gb, 3), r(x.file_gb, 3), x.share, date_str(x.last_viewed), date_str(x.created)]
                                  for x in g.head(max_items).itertuples(index=False)]
         return acct, acct_items
+
+    def recycle_bin(named):
+        """What is in the AGOL recycle bin: counts, and the items (largest first; titles and owners only when named)."""
+        b = binned.sort_values("feature_gb", ascending=False)
+        owner_unit = dict(zip(snap["key"], snap["unit"]))
+        return {"items": len(b), "feature_gb": r(b["feature_gb"].sum(), 3), "file_gb": r(b["file_gb"].sum(), 3),
+                "owners": int(b["owner"].str.strip().str.lower().nunique()),
+                "list": [{"title": x.title if named else f"{x.item_type} #{i + 1}", "id": x.item_id if named else "", "type": x.item_type,
+                          "owner": x.owner if named else "", "unit": owner_unit.get(str(x.owner).strip().lower(), "Unit unknown"),
+                          "feature_gb": r(x.feature_gb, 3), "file_gb": r(x.file_gb, 3)}
+                         for i, x in enumerate(b.head(200).itertuples(index=False))]}
 
     def supv(row, named):  # the owner's latest supervisor on record; the published edition says only whether there is one
         s = row["supervisor"] if isinstance(row["supervisor"], str) else ""
@@ -504,7 +519,7 @@ def main():
                 c_["supervisor"] = s_ if isinstance(s_, str) else ""
         return {"edition": "full" if named else "published", "as_of": str(as_of), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "sources": f"{members_table}, {items_table}, snapshot {snap['run_id'].iloc[0]}",
-                "limits": {"feature_gb": FEATURE_LIMIT_GB, "accounts": ACCOUNT_LIMIT}, "total": total, "current_accounts": current_accounts, "trend": trend,
+                "limits": {"feature_gb": FEATURE_LIMIT_GB, "accounts": ACCOUNT_LIMIT}, "total": total, "current_accounts": current_accounts, "recycle_bin": recycle_bin(named), "trend": trend,
                 "classes": classes, "removal": removal, "units": units, "unit_trend": unit_trend, "item_types": item_types,
                 "viewed": viewed, "logins": logins, "roles": roles, "login_types": logintypes, "top_items": ti, "top_users": tu,
                 "change_counts": change_counts, "change_list": change_list, "quality": quality,
