@@ -99,7 +99,9 @@ networks only, behind Auth0. Everything about running it (manifests, firewall ru
 image, checking a run) is in the private kubernetes-config repository, folder `10. AGOL Cleanup/`.
 
 - **Dan runs every command that changes the cluster or the firewall.** Give him the commands, one at a time
-  for Windows PowerShell 5.1 (no `&&`), and check each result with him. Reading the cluster is fine.
+  and check each result with him. Reading the cluster is fine.
+- **Every command for Dan is Windows PowerShell 5.1**, in a `powershell` block, one command per block: no `&&`,
+  quoted Windows paths, `$env:VAR`, `&` to run a program from a variable (Dan, 21 October 2026).
 - **Show Dan any GitHub text (PR, issue, comment) before posting it.**
 - The page holds no data: it asks the site's API (`/api/v1/...`, `web/app.py`, `dashboard/queries.py`), which
   reads the read-only copy the daily job publishes. Check a view moved to the API against what it showed before.
