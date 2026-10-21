@@ -10,12 +10,7 @@
 # Date: 2026-04-02
 
 
-from urllib.parse import quote_plus
-
 import pandas as pd
-
-from sqlalchemy import create_engine, text
-from sqlalchemy.dialects.mssql import NVARCHAR, DATETIME, BIT, INTEGER
 
 import datetime
 import os
@@ -23,6 +18,7 @@ import os
 from os import getenv
 from dotenv import load_dotenv
 
+from agol_db import connect, exists, q, read, reports_dir, write
 from TAMU_AGOL_UserQuotas import collect_table_names
 from TAMU_AGOL_Runs import Run
 
@@ -37,18 +33,8 @@ ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 
-sql_connection_string = (getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
-if not sql_connection_string:
-    raise RuntimeError(
-        f"Missing SQL_CONNECTION_STRING. Add it to environment variables or {ENV_PATH}."
-    )
-
-# Accept either a SQLAlchemy URL or a raw ODBC connection string (Driver=...;Server=...;...)
-if "://" in sql_connection_string:
-    engine = create_engine(sql_connection_string)
-else:
-    odbc_connect = quote_plus(sql_connection_string)
-    engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
+# The database connection of this run (DuckDB, agol_db.py), opened in main()
+con = None
 
 
 SENDER_EMAIL = getenv("SENDER_EMAIL")
@@ -57,8 +43,8 @@ SENDER_PASSWORD = getenv("SENDER_PASSWORD")
 SMTP_PORT = getenv("SMTP_PORT")
 SMTP_SERVER = getenv("SMTP_SERVER")
 
-DELETE_STATUS_TABLE_NAME = getenv("DELETE_STATUS_TABLE_NAME")
-WHITELISTED_ENTRAID_GROUPS_TABLE_NAME = getenv("WHITELISTED_ENTRAID_GROUPS_TABLE_NAME")
+DELETE_STATUS_TABLE_NAME = getenv("DELETE_STATUS_TABLE_NAME") or "DeleteStatus"
+WHITELISTED_ENTRAID_GROUPS_TABLE_NAME = getenv("WHITELISTED_ENTRAID_GROUPS_TABLE_NAME") or "Whitelisted_EntraID_Groups"
 
 
 # FUNCTIONS
@@ -69,18 +55,10 @@ WHITELISTED_ENTRAID_GROUPS_TABLE_NAME = getenv("WHITELISTED_ENTRAID_GROUPS_TABLE
 
 
 def deletestatus_sql_datatypes():
-    """This function defines the SQL data types for the DeleteStatus table."""
-    return {
-        'Username': NVARCHAR(255),
-        'Name': NVARCHAR(255),
-        'WorkingEmail': NVARCHAR(255),
-        'ManagerEmail': NVARCHAR(255),
-        'DeleteStatus': INTEGER,
-        'FlagDate': DATETIME,
-        'DeleteDate': DATETIME,
-        'Override': BIT,
-        'updated_date': DATETIME
-    }
+    """Column types of the DeleteStatus table (DuckDB)."""
+    return {'Username': 'VARCHAR', 'Name': 'VARCHAR', 'WorkingEmail': 'VARCHAR', 'ManagerEmail': 'VARCHAR',
+            'DeleteStatus': 'INTEGER', 'FlagDate': 'TIMESTAMP', 'DeleteDate': 'TIMESTAMP', 'Override': 'BOOLEAN',
+            'updated_date': 'TIMESTAMP'}
 
 
 def collect_entraid_table_name():
@@ -88,14 +66,7 @@ def collect_entraid_table_name():
     Returns:
         entraid_table_name (str): The name of the most recent EntraID status table.
     """
-    with engine.connect() as connection:
-        cursor_entraid = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'AGOL_EntraID_Status%'"))
-        previous_entraid_reports = cursor_entraid.fetchall()
-
-    # Return the most recent EntraID table name
-    entraid_table_name = previous_entraid_reports[-1][0] if previous_entraid_reports else None
-
-    return entraid_table_name
+    return "AGOL_EntraID_Status" if exists(con, "AGOL_EntraID_Status") else None
 
 def get_empty_users(member_table_name, item_table_name):
     """Users who own no items, sign in with a NetID (enterprise login) and own no groups: the empty accounts
@@ -107,15 +78,13 @@ def get_empty_users(member_table_name, item_table_name):
 
     query = f"""
     SELECT m.Username
-    FROM {member_table_name} m
-    LEFT JOIN {item_table_name} i ON m.Username = i.Owner
-    WHERE i.[Item ID] IS NULL
-      AND m.[Login Type] = 'enterprise'
-      AND ISNULL(m.[# of Groups Owned], 0) = 0
+    FROM {q(member_table_name)} m
+    LEFT JOIN {q(item_table_name)} i ON m.Username = i.Owner
+    WHERE i."Item ID" IS NULL
+      AND m."Login Type" = 'enterprise'
+      AND COALESCE(m."# of Groups Owned", 0) = 0
     """
-    with engine.connect() as connection:
-        result = connection.execute(text(query))
-        empty_users = [row[0] for row in result.fetchall()]
+    empty_users = [row[0] for row in con.execute(query).fetchall()]
     
     print(f'Found {len(empty_users)} users with 0 items published.')
 
@@ -130,9 +99,8 @@ def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name, dry_
 
     print ("Updating DeleteStatus table with any new users...")
 
-    with engine.connect() as connection:
-        delete_status_df = pd.read_sql(text(f"SELECT * FROM {delete_status_table_name}"), connection)
-        entraid_df = pd.read_sql(text(f"SELECT * FROM {entraid_table_name}"), connection)
+    delete_status_df = read(con, f"SELECT * FROM {q(delete_status_table_name)}")
+    entraid_df = read(con, f"SELECT * FROM {q(entraid_table_name)}")
 
     # Identify new members that are not in the delete status table
     new_users_df = entraid_df[~entraid_df['Username'].isin(delete_status_df['Username'])]
@@ -153,7 +121,7 @@ def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name, dry_
 
         # Upload the updated delete status DataFrame back to the database (not in a dry run)
         if not dry_run:
-            updated_delete_status_df.to_sql(delete_status_table_name, con=engine, if_exists='replace', index=False, dtype=deletestatus_sql_datatypes())
+            write(con, delete_status_table_name, updated_delete_status_df, types=deletestatus_sql_datatypes())
     
     return updated_delete_status_df if not new_users_df.empty else delete_status_df
 
@@ -169,10 +137,9 @@ def person_map(usernames):
         u = str(u).strip().lower()
         if suffix and u.endswith(suffix) and "@" in u:
             out[u] = u[: -len(suffix)]
-    with engine.connect() as connection:
-        if connection.execute(text("SELECT OBJECT_ID('dbo.HIST_AccountNetIDs')")).scalar() is not None:
-            for u, netid in connection.execute(text("SELECT Username, NetID FROM dbo.HIST_AccountNetIDs ORDER BY LastSeen")):
-                out[u.strip().lower()] = netid.strip().lower()
+    if exists(con, "HIST_AccountNetIDs"):
+        for u, netid in con.execute("SELECT Username, NetID FROM HIST_AccountNetIDs ORDER BY LastSeen").fetchall():
+            out[u.strip().lower()] = netid.strip().lower()
     return out
 
 
@@ -200,7 +167,7 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
 
     print ("Calculating delete status for users in DeleteStatus table...")
 
-    whitelisted_groups_df = pd.read_sql(text(f"SELECT * FROM {WHITELISTED_ENTRAID_GROUPS_TABLE_NAME}"), engine)
+    whitelisted_groups_df = read(con, f"SELECT * FROM {q(WHITELISTED_ENTRAID_GROUPS_TABLE_NAME)}")
     whitelisted_group_ids = {str(g).strip().lower() for g in whitelisted_groups_df['ID']}
 
     lookup = {}
@@ -291,9 +258,9 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
         run.note(changes=len(moved), status_counts={str(k): int(v) for k, v in counts.items()},
                  changes_by_reason={f"{f}->{t} {r}": int(n) for (f, t, r), n in moved.groupby(["From", "To", "Reason"]).size().items()} if not moved.empty else {})
     else:
-        reports_dir = os.path.join(SCRIPT_DIR, 'reports')
-        os.makedirs(reports_dir, exist_ok=True)
-        changes_path = os.path.join(reports_dir, f"DeleteStatus_changes_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}{'_dryrun' if dry_run else ''}.csv")
+        folder = reports_dir()
+        os.makedirs(folder, exist_ok=True)
+        changes_path = os.path.join(folder, f"DeleteStatus_changes_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}{'_dryrun' if dry_run else ''}.csv")
     moved.to_csv(changes_path, index=False)
     print(f"Wrote {len(moved)} changes to {changes_path}")
 
@@ -316,7 +283,7 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
         raise RuntimeError("Refusing to save: " + limit_message + " Nothing was written.")
 
     # Upload the updated delete status DataFrame back to the database
-    delete_status_df.to_sql(DELETE_STATUS_TABLE_NAME, con=engine, if_exists='replace', index=False, dtype=deletestatus_sql_datatypes())
+    write(con, DELETE_STATUS_TABLE_NAME, delete_status_df, types=deletestatus_sql_datatypes())
 
 
 def Delete_Users(delete_status_df):
@@ -340,33 +307,29 @@ def Archive_DeleteStatus(run_id):
     """Copies the current DeleteStatus table into HIST_DeleteStatus, stamped with today's date, before
     this run replaces it. Until 2 October 2026 every run overwrote the table with no copy kept, so a
     run on a bad lookup could not be undone or even seen afterwards."""
-    with engine.begin() as connection:
-        if connection.execute(text(f"SELECT OBJECT_ID('{DELETE_STATUS_TABLE_NAME}')")).scalar() is None:
-            return
-        columns = [r[0] for r in connection.execute(text(
-            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = :t ORDER BY ORDINAL_POSITION"),
-            {"t": DELETE_STATUS_TABLE_NAME})]
-        column_sql = ", ".join(f"[{c}]" for c in columns)
-        if connection.execute(text("SELECT OBJECT_ID('HIST_DeleteStatus')")).scalar() is None:
-            connection.execute(text(f"SELECT {column_sql}, CAST(GETDATE() AS DATE) AS archived_date, "
-                                    f"CAST(:run AS NVARCHAR(60)) AS archived_by_run "
-                                    f"INTO HIST_DeleteStatus FROM {DELETE_STATUS_TABLE_NAME}"), {"run": run_id})
-        else:
-            connection.execute(text(f"INSERT INTO HIST_DeleteStatus ({column_sql}, archived_date, archived_by_run) "
-                                    f"SELECT {column_sql}, CAST(GETDATE() AS DATE), :run FROM {DELETE_STATUS_TABLE_NAME}"), {"run": run_id})
+    if not exists(con, DELETE_STATUS_TABLE_NAME):
+        return
+    if not exists(con, "HIST_DeleteStatus"):
+        con.execute(f"CREATE TABLE HIST_DeleteStatus AS SELECT *, CURRENT_DATE AS archived_date, CAST(? AS VARCHAR) AS archived_by_run "
+                    f"FROM {q(DELETE_STATUS_TABLE_NAME)}", [run_id])
+    else:
+        con.execute(f"INSERT INTO HIST_DeleteStatus BY NAME SELECT *, CURRENT_DATE AS archived_date, CAST(? AS VARCHAR) AS archived_by_run "
+                    f"FROM {q(DELETE_STATUS_TABLE_NAME)}", [run_id])
     print("Archived the current DeleteStatus table to HIST_DeleteStatus.")
 
 
 def main(dry_run=False):
-    with Run(engine, 'deletestatus', dry_run=dry_run) as run:
+    global con
+    # A dry run changes nothing but its own line in RUNS.
+    with connect() as con, Run(con, 'deletestatus', dry_run=dry_run) as run:
         if not dry_run:
             Archive_DeleteStatus(run.run_id)
         entraid_table_name = collect_entraid_table_name()
 
         delete_status_df = Update_DeleteStatus_Table(entraid_table_name, DELETE_STATUS_TABLE_NAME, dry_run)
-        entraid_status_df = pd.read_sql(text(f"SELECT * FROM AGOL_EntraID_Status"), engine)
+        entraid_status_df = read(con, "SELECT * FROM AGOL_EntraID_Status")
 
-        member_table_name, item_table_name = collect_table_names()
+        member_table_name, item_table_name = collect_table_names(con)
         run.note(member_table=member_table_name, item_table=item_table_name, dry_run=dry_run)
         Calculate_Delete_Status(delete_status_df, entraid_status_df, get_empty_users(member_table_name, item_table_name), dry_run, run)
         # Delete_Users(delete_status_df)

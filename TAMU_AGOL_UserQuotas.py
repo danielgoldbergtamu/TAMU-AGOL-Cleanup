@@ -5,10 +5,6 @@
 # Author: Dalton Peterson
 # Date: 2026-04-02
 
-from urllib.parse import quote_plus
-from sqlalchemy import create_engine
-from sqlalchemy import text
-
 import pandas as pd
 
 from os import getenv
@@ -17,7 +13,7 @@ from dotenv import load_dotenv
 import datetime
 import os
 
-from arcgis.gis import GIS
+from agol_db import connect, newest, q, read
 
 
 # GLOBAL VARIABLES & INITIALIZATION
@@ -30,7 +26,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
 
 DELETE_STATUS_TABLE_NAME = os.getenv("DELETE_STATUS_TABLE_NAME")
-USER_STORAGE_QUOTA_MB = int(os.getenv("USER_STORAGE_QUOTA_MB"))
+USER_STORAGE_QUOTA_MB = int(os.getenv("USER_STORAGE_QUOTA_MB") or 0)
 
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = os.getenv("SMTP_PORT")
@@ -39,52 +35,16 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 
 
-# Connect to SQL Server using SQLALchemy
-sql_connection_string = (getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
-if not sql_connection_string:
-    raise RuntimeError(
-        f"Missing SQL_CONNECTION_STRING. Add it to environment variables or {ENV_PATH}."
-    )
-
-# Accept either a SQLAlchemy URL or a raw ODBC connection string (Driver=...;Server=...;...)
-if "://" in sql_connection_string:
-    engine = create_engine(sql_connection_string)
-else:
-    odbc_connect = quote_plus(sql_connection_string)
-    engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
-
-
-# Connect to AGOL using user credentials
-gis = GIS("home")
-print(f'connected to ArcGIS online as {gis.users.me.username}')
-
-
 # FUNCTIONS
 #############################################################################################
 
 
-def collect_table_names():
-    """This function collects the names of the most recent member and item report tables from the DB.
-    Returns:
-        member_table_name (str): The name of the most recent member report table.
-        item_table_name (str): The name of the most recent item report table.
-    """
-    print("Collecting the names of the most recent member and item report tables from the database...")
-    with engine.connect() as connection:
-        cursor_item = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'OrganizationItems_%'"))
-        previous_item_reports = cursor_item.fetchall()
-        
-        cursor_member = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'OrganizationMembers_%'"))
-        previous_member_reports = cursor_member.fetchall()
-
-    # Return the most recent table names
-    member_table_name = previous_member_reports[-1][0] if previous_member_reports else None
-    item_table_name = previous_item_reports[-1][0] if previous_item_reports else None
-
-    return member_table_name, item_table_name
+def collect_table_names(con):
+    """Names of the newest member and item report tables in the database."""
+    return newest(con, "OrganizationMembers_"), newest(con, "OrganizationItems_")
 
 
-def calculate_user_storage_quota(member_table_name, item_table_name):
+def calculate_user_storage_quota(con, member_table_name, item_table_name):
     """This function calculates the total storage used by each user and identifies those that exceed the specified quota.
     Args:
         member_table_name (str): The name of the member report table to query for user information.
@@ -101,16 +61,13 @@ def calculate_user_storage_quota(member_table_name, item_table_name):
         m.Username,
         m.Email,
         m.Name,
-        SUM(i.[Feature Storage Size]) AS total_feature_storage_mb
-    FROM {member_table_name} m
-    JOIN {item_table_name} i ON m.Username = i.Owner
+        SUM(i."Feature Storage Size") AS total_feature_storage_mb
+    FROM {q(member_table_name)} m
+    JOIN {q(item_table_name)} i ON m.Username = i.Owner
     GROUP BY m.Username, m.Email, m.Name
-    HAVING SUM(i.[Feature Storage Size]) > {USER_STORAGE_QUOTA_MB}
+    HAVING SUM(i."Feature Storage Size") > {USER_STORAGE_QUOTA_MB}
     """
-
-    with engine.connect() as connection:
-        result = connection.execute(text(query))
-        over_quota_users = pd.DataFrame(result.fetchall(), columns=result.keys())
+    over_quota_users = read(con, query)
 
     print(f"Found {len(over_quota_users)} users that exceed the storage quota.")
     return over_quota_users
@@ -118,9 +75,9 @@ def calculate_user_storage_quota(member_table_name, item_table_name):
 
 def main():
     from TAMU_AGOL_Runs import Run
-    with Run(engine, 'userquotas') as run:
-        member_table_name, item_table_name = collect_table_names()
-        over_quota_users = calculate_user_storage_quota(member_table_name, item_table_name)
+    with connect() as con, Run(con, 'userquotas') as run:
+        member_table_name, item_table_name = collect_table_names(con)
+        over_quota_users = calculate_user_storage_quota(con, member_table_name, item_table_name)
 
         over_quota_df = over_quota_users.sort_values(by='total_feature_storage_mb', ascending=False)
         over_quota_csv = run.path('UsersOverQuota.csv')   # this run's folder: never overwrites an earlier list

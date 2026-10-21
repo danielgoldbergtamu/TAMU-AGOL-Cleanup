@@ -17,11 +17,11 @@ import time
 from datetime import date
 
 from dotenv import load_dotenv
-from sqlalchemy import text
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
-from TAMU_AGOL_EntraID import GraphAuth, member_key, odata_list, record_names, run_all, sql_engine, users_url  # noqa: E402
+from agol_db import connect, exists  # noqa: E402
+from TAMU_AGOL_EntraID import GraphAuth, member_key, odata_list, record_names, run_all, users_url  # noqa: E402
 
 PER_REQUEST = 7   # Graph allows at most 15 values in a whole filter, and each email is asked twice (UPN and mail)
 
@@ -34,19 +34,16 @@ def main():
     args = parser.parse_args()
     suffix = os.getenv("AGOL_USERNAME_SUFFIX", "")
 
-    engine = sql_engine()
-    if engine is None:
-        sys.exit("SQL_CONNECTION_STRING is not set in .env")
-    with engine.connect() as c:
+    with connect(read_only=True) as c:   # closed before the lookup: record_names opens it to write
         named = set()
-        if c.execute(text("SELECT OBJECT_ID('dbo.HIST_PersonNames')")).scalar() is not None:
-            named = {r[0] for r in c.execute(text("SELECT DISTINCT Email FROM dbo.HIST_PersonNames"))}
+        if exists(c, "HIST_PersonNames"):
+            named = {r[0] for r in c.execute("SELECT DISTINCT Email FROM HIST_PersonNames").fetchall()}
         # key (what the name is recorded under) -> email to look up
         wanted = {r[0].strip().lower(): r[0].strip().lower()
-                  for r in c.execute(text("SELECT DISTINCT ManagerEmail FROM dbo.HIST_Supervisors WHERE ISNULL(ManagerEmail, '') <> ''"))}
+                  for r in c.execute("SELECT DISTINCT ManagerEmail FROM HIST_Supervisors WHERE COALESCE(ManagerEmail, '') <> ''").fetchall()}
         supervisors = len(wanted)
-        for username, working in c.execute(text("SELECT Username, WorkingEmail FROM dbo.AGOL_EntraID_Status "
-                                                "WHERE EntraID_Status = 1 AND ISNULL(WorkingEmail, '') <> ''")):
+        for username, working in c.execute("SELECT Username, WorkingEmail FROM AGOL_EntraID_Status "
+                                           "WHERE EntraID_Status AND COALESCE(WorkingEmail, '') <> ''").fetchall():
             wanted.setdefault(member_key(username, suffix), working.strip().lower())
     todo = sorted((k, e) for k, e in wanted.items() if k not in named)
     if args.limit:

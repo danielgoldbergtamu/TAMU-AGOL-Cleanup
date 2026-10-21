@@ -31,7 +31,7 @@
 #   ENTRA_CLIENT_ID       a public-client app allowed delegated User.Read.All
 #   ORG_EMAIL_DOMAIN      domain that NetID-style usernames belong to
 #   AGOL_USERNAME_SUFFIX  suffix AGOL adds to SSO usernames, e.g. _tamu
-#   SQL_CONNECTION_STRING SQLAlchemy URL of the catalog database (for HIST_Supervisors)
+#   AGOL_DUCKDB           the DuckDB file (default data/agol.duckdb) for the history tables
 #
 # Usage (from the cloned ArcGIS Pro environment):
 #   python TAMU_AGOL_EntraID.py --input_csv_path reports/OrganizationMembers_2026_10_01.csv
@@ -252,119 +252,100 @@ def pick_match(candidates, users):
 # Supervisor history (CLAUDE.md: capture supervisors every run, never overwrite with a blank)
 ###########################################################################################
 
-def sql_engine():
-    from sqlalchemy import create_engine
-
-    url = (os.getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
-    if not url:
-        return None
-    if "://" in url:
-        return create_engine(url)
-    # a raw ODBC connection string, as the other scripts also accept
-    return create_engine("mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(url))
-
-
 def member_key(username, suffix):
     """netid@example.edu_org -> netid@example.edu: the key HIST_Supervisors and HIST_PersonNames use."""
     user = (username or "").strip().lower()
     return user[: -len(suffix)] if suffix and user.endswith(suffix.lower()) else user
 
 
+# The history writers below open the database only for their own write (agol_db, DuckDB: one writer at a time);
+# the catalog does not hold it while this lookup runs. Each is an upsert in one pass: matching rows get their dates
+# widened, new ones are added, and nothing is overwritten with a blank.
+
 def record_names(people, run_date, source):
     """Adds first and last names to HIST_PersonNames, one row per email and name; a changed name is a new
     row, and nothing is overwritten with a blank. people: iterable of (email, first, last, display)."""
-    from sqlalchemy import text
+    import pandas as pd
+    from agol_db import connect
 
-    engine = sql_engine()
-    if engine is None:
-        print("SQL_CONNECTION_STRING not set; name history NOT updated.")
-        return
-    merge = text("""
-        MERGE dbo.HIST_PersonNames AS t
-        USING (SELECT :email AS Email, :first AS FirstName, :last AS LastName) AS s
-           ON t.Email = s.Email AND ISNULL(t.FirstName, '') = ISNULL(s.FirstName, '') AND ISNULL(t.LastName, '') = ISNULL(s.LastName, '')
-        WHEN MATCHED THEN UPDATE SET
-             LastSeen = CASE WHEN t.LastSeen < :seen THEN :seen ELSE t.LastSeen END,
-             FirstSeen = CASE WHEN t.FirstSeen > :seen THEN :seen ELSE t.FirstSeen END,
-             DisplayName = COALESCE(NULLIF(:display, ''), t.DisplayName),
-             Sources = CASE WHEN t.Sources LIKE '%' + :source + '%' THEN t.Sources ELSE t.Sources + ';' + :source END
-        WHEN NOT MATCHED THEN INSERT (Email, FirstName, LastName, DisplayName, FirstSeen, LastSeen, Sources)
-             VALUES (:email, :first, :last, NULLIF(:display, ''), :seen, :seen, :source);""")
-    count = 0
-    with engine.begin() as conn:
-        conn.execute(text("""
-            IF OBJECT_ID('dbo.HIST_PersonNames') IS NULL
-            CREATE TABLE dbo.HIST_PersonNames (Email NVARCHAR(255) NOT NULL, FirstName NVARCHAR(255) NULL,
-                LastName NVARCHAR(255) NULL, DisplayName NVARCHAR(255) NULL, FirstSeen DATE NOT NULL,
-                LastSeen DATE NOT NULL, Sources NVARCHAR(400) NOT NULL)"""))
-        for email, first, last, display in people:
-            email = (email or "").strip().lower()
-            if not email or not ((first or "").strip() or (last or "").strip() or (display or "").strip()):
-                continue
-            conn.execute(merge, {"email": email, "first": (first or "").strip() or None, "last": (last or "").strip() or None,
-                                 "display": (display or "").strip(), "seen": run_date, "source": source})
-            count += 1
-    print(f"Name history: {count} names recorded in HIST_PersonNames.")
+    rows = {}
+    for email, first, last, display in people:
+        email = (email or "").strip().lower()
+        first, last, display = (first or "").strip() or None, (last or "").strip() or None, (display or "").strip()
+        if email and (first or last or display):
+            rows[(email, first or "", last or "")] = (email, first, last, display)
+    frame = pd.DataFrame(list(rows.values()), columns=["Email", "FirstName", "LastName", "DisplayName"])
+    frame["seen"], frame["source"] = run_date, source
+    with connect() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS HIST_PersonNames (Email VARCHAR NOT NULL, FirstName VARCHAR, LastName VARCHAR,
+                       DisplayName VARCHAR, FirstSeen DATE NOT NULL, LastSeen DATE NOT NULL, Sources VARCHAR NOT NULL)""")
+        con.register("src", frame)
+        match = ("t.Email = s.Email AND COALESCE(t.FirstName, '') = COALESCE(s.FirstName, '') "
+                 "AND COALESCE(t.LastName, '') = COALESCE(s.LastName, '')")
+        con.execute(f"""UPDATE HIST_PersonNames t SET
+                LastSeen = GREATEST(t.LastSeen, CAST(s.seen AS DATE)), FirstSeen = LEAST(t.FirstSeen, CAST(s.seen AS DATE)),
+                DisplayName = COALESCE(NULLIF(s.DisplayName, ''), t.DisplayName),
+                Sources = CASE WHEN contains(t.Sources, s.source) THEN t.Sources ELSE t.Sources || ';' || s.source END
+            FROM src s WHERE {match}""")
+        con.execute(f"""INSERT INTO HIST_PersonNames
+            SELECT s.Email, s.FirstName, s.LastName, NULLIF(s.DisplayName, ''), CAST(s.seen AS DATE), CAST(s.seen AS DATE), s.source
+            FROM src s WHERE NOT EXISTS (SELECT 1 FROM HIST_PersonNames t WHERE {match})""")
+        con.unregister("src")
+    print(f"Name history: {len(frame)} names recorded in HIST_PersonNames.")
 
 
 def record_netids(pairs, run_date):
     """Adds (AGOL username, NetID) pairs to HIST_AccountNetIDs; the NetID is the Entra userPrincipalName the
     account matched, whatever address matched it. One row per pair, with the dates it was seen."""
-    from sqlalchemy import text
+    import pandas as pd
+    from agol_db import connect
 
-    engine = sql_engine()
-    if engine is None:
-        print("SQL_CONNECTION_STRING not set; account NetIDs NOT recorded.")
-        return
-    merge = text("""
-        MERGE dbo.HIST_AccountNetIDs AS t
-        USING (SELECT :user AS Username, :netid AS NetID) AS s ON t.Username = s.Username AND t.NetID = s.NetID
-        WHEN MATCHED THEN UPDATE SET LastSeen = CASE WHEN t.LastSeen < :seen THEN :seen ELSE t.LastSeen END,
-                                     FirstSeen = CASE WHEN t.FirstSeen > :seen THEN :seen ELSE t.FirstSeen END
-        WHEN NOT MATCHED THEN INSERT (Username, NetID, FirstSeen, LastSeen) VALUES (:user, :netid, :seen, :seen);""")
-    with engine.begin() as conn:
-        conn.execute(text("""
-            IF OBJECT_ID('dbo.HIST_AccountNetIDs') IS NULL
-            CREATE TABLE dbo.HIST_AccountNetIDs (Username NVARCHAR(255) NOT NULL, NetID NVARCHAR(255) NOT NULL,
-                FirstSeen DATE NOT NULL, LastSeen DATE NOT NULL)"""))
-        for user, netid in pairs:
-            conn.execute(merge, {"user": user.strip().lower(), "netid": netid.strip().lower(), "seen": run_date})
-    print(f"Account NetIDs: {len(pairs)} recorded in HIST_AccountNetIDs.")
+    frame = pd.DataFrame(sorted({(u.strip().lower(), n.strip().lower()) for u, n in pairs}), columns=["Username", "NetID"])
+    frame["seen"] = run_date
+    with connect() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS HIST_AccountNetIDs (Username VARCHAR NOT NULL, NetID VARCHAR NOT NULL,
+                       FirstSeen DATE NOT NULL, LastSeen DATE NOT NULL)""")
+        con.register("src", frame)
+        con.execute("""UPDATE HIST_AccountNetIDs t SET LastSeen = GREATEST(t.LastSeen, CAST(s.seen AS DATE)),
+                              FirstSeen = LEAST(t.FirstSeen, CAST(s.seen AS DATE))
+                       FROM src s WHERE t.Username = s.Username AND t.NetID = s.NetID""")
+        con.execute("""INSERT INTO HIST_AccountNetIDs SELECT s.Username, s.NetID, CAST(s.seen AS DATE), CAST(s.seen AS DATE) FROM src s
+                       WHERE NOT EXISTS (SELECT 1 FROM HIST_AccountNetIDs t WHERE t.Username = s.Username AND t.NetID = s.NetID)""")
+        con.unregister("src")
+    print(f"Account NetIDs: {len(frame)} recorded in HIST_AccountNetIDs.")
 
 
 def record_supervisors(rows, run_date):
-    from sqlalchemy import text
+    import pandas as pd
+    from agol_db import connect
 
-    engine = sql_engine()
-    if engine is None:
-        print("SQL_CONNECTION_STRING not set; supervisor history NOT updated.")
-        return
-    merge = text("""
-        MERGE dbo.HIST_Supervisors AS t
-        USING (SELECT :user AS UserEmail, :mgr AS ManagerEmail) AS s
-           ON t.UserEmail = s.UserEmail AND t.ManagerEmail = s.ManagerEmail
-        WHEN MATCHED THEN UPDATE SET
-             LastSeen = CASE WHEN t.LastSeen IS NULL OR t.LastSeen < :seen THEN :seen ELSE t.LastSeen END,
-             FirstSeen = CASE WHEN t.FirstSeen IS NULL OR t.FirstSeen > :seen THEN :seen ELSE t.FirstSeen END,
-             ManagerDepartment = COALESCE(NULLIF(:mdept, ''), t.ManagerDepartment),
-             UserDepartment = COALESCE(NULLIF(:udept, ''), t.UserDepartment),
-             Sightings = t.Sightings + 1,
-             Sources = CASE WHEN t.Sources LIKE '%TAMU_AGOL_EntraID.py%' THEN t.Sources ELSE t.Sources + ';TAMU_AGOL_EntraID.py' END
-        WHEN NOT MATCHED THEN INSERT
-             (UserEmail, ManagerEmail, ManagerDepartment, UserDepartment, FirstSeen, LastSeen, Sightings, Sources)
-             VALUES (:user, :mgr, NULLIF(:mdept, ''), NULLIF(:udept, ''), :seen, :seen, 1, 'TAMU_AGOL_EntraID.py');""")
     suffix = os.getenv("AGOL_USERNAME_SUFFIX", "")
-    count = 0
-    with engine.begin() as conn:
-        for row in rows:
-            if not row["ManagerEmail"]:
-                continue
-            user = member_key(row["Username"], suffix)
-            conn.execute(merge, {"user": user, "mgr": row["ManagerEmail"].strip().lower(),
-                                 "mdept": row["ManagerDepartment"], "udept": row["UserDepartment"],
-                                 "seen": run_date})
-            count += 1
-    print(f"Supervisor history: {count} supervisor sightings recorded in HIST_Supervisors.")
+    seen = {}
+    for row in rows:
+        if not row["ManagerEmail"]:
+            continue
+        key = (member_key(row["Username"], suffix), row["ManagerEmail"].strip().lower())
+        sightings = seen.get(key, (None, None, 0))[2] + 1
+        seen[key] = (row["ManagerDepartment"] or None, row["UserDepartment"] or None, sightings)
+    frame = pd.DataFrame([(u, m, md, ud, n) for (u, m), (md, ud, n) in seen.items()],
+                         columns=["UserEmail", "ManagerEmail", "ManagerDepartment", "UserDepartment", "Sightings"])
+    frame["seen"] = run_date
+    with connect() as con:
+        con.register("src", frame)
+        con.execute("""UPDATE HIST_Supervisors t SET
+                LastSeen = CASE WHEN t.LastSeen IS NULL OR t.LastSeen < CAST(s.seen AS DATE) THEN CAST(s.seen AS DATE) ELSE t.LastSeen END,
+                FirstSeen = CASE WHEN t.FirstSeen IS NULL OR t.FirstSeen > CAST(s.seen AS DATE) THEN CAST(s.seen AS DATE) ELSE t.FirstSeen END,
+                ManagerDepartment = COALESCE(NULLIF(s.ManagerDepartment, ''), t.ManagerDepartment),
+                UserDepartment = COALESCE(NULLIF(s.UserDepartment, ''), t.UserDepartment),
+                Sightings = t.Sightings + s.Sightings,
+                Sources = CASE WHEN contains(t.Sources, 'TAMU_AGOL_EntraID.py') THEN t.Sources ELSE t.Sources || ';TAMU_AGOL_EntraID.py' END
+            FROM src s WHERE t.UserEmail = s.UserEmail AND t.ManagerEmail = s.ManagerEmail""")
+        con.execute("""INSERT INTO HIST_Supervisors (UserEmail, ManagerEmail, ManagerDepartment, UserDepartment, FirstSeen, LastSeen, Sightings, Sources)
+            SELECT s.UserEmail, s.ManagerEmail, NULLIF(s.ManagerDepartment, ''), NULLIF(s.UserDepartment, ''),
+                   CAST(s.seen AS DATE), CAST(s.seen AS DATE), s.Sightings, 'TAMU_AGOL_EntraID.py'
+            FROM src s WHERE NOT EXISTS (SELECT 1 FROM HIST_Supervisors t WHERE t.UserEmail = s.UserEmail AND t.ManagerEmail = s.ManagerEmail)""")
+        con.unregister("src")
+    print(f"Supervisor history: {int(frame['Sightings'].sum()) if len(frame) else 0} supervisor sightings recorded in HIST_Supervisors.")
 
 
 # Main
