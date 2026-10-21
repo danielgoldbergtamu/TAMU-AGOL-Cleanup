@@ -557,6 +557,24 @@ def main():
                 "runs": runs.astype(str).to_dict("records"), "scopes": scopes(named), "review": review(named), "degree_names": degree_names, "degree_notes": unconfirmed,
                 "placement": {f"{u}\u0001{s}": list(place(u, s)) for u, s in set(zip(snap_unit, snap_sub)) | set(zip(items["item_unit"], items["item_sub"])) if s}, "people": people(named)}
 
+    def write_site_tables(acct, acct_items, names, logins, person_of_multi, counts):
+        """Every account's page, for the website's API (/api/v1/account/<name>): written to the database each run
+        (replacing the last run's), and copied to the site's read-only copy by tools/publish_serving_db.py."""
+        accounts = pd.DataFrame([{"key": k, **v} for k, v in acct.items()])
+        item_rows = pd.DataFrame([[k, n_, *x] for k, xs in acct_items.items() for n_, x in enumerate(xs)],
+                                 columns=["key", "n", "item_id", "title", "item_type", "feature_gb", "file_gb", "share", "last_viewed", "created"])
+        text = lambda df: {c_: "VARCHAR" for c_ in df.columns if df[c_].dtype == object}
+        tables = {"DASH_Account": accounts, "DASH_AccountItems": item_rows,
+                  "DASH_Names": pd.DataFrame(sorted(names.items()), columns=["key", "name"]),
+                  "DASH_ArcgisLogins": pd.DataFrame(sorted(logins.items()), columns=["key", "email"]),
+                  "DASH_PersonOf": pd.DataFrame([(k, p, int(counts[p])) for k, p in sorted(person_of_multi.items())], columns=["key", "person", "accounts"])}
+        with db.connect() as c:
+            c.execute("BEGIN")
+            for name, df in tables.items():
+                db.write(c, name, df, mode="replace", types=text(df))
+            c.execute("COMMIT")
+        print("site tables: " + ", ".join(f"{k} {len(v)}" for k, v in tables.items()))
+
     template = open(os.path.join(HERE, "full_template.html"), encoding="utf-8").read()
     out = db.output_dir()
     os.makedirs(out, exist_ok=True)
@@ -574,6 +592,8 @@ def main():
             data["person_of"] = {norm(k): p for k, p in person_of.items() if k in shown_accounts and p in counts}
             data["person_n"] = {p: int(n) for p, n in counts.items()}
             data["acct"], data["acct_items"] = account_pages(shown_accounts | set(snap.loc[snap["person"].isin(in_multi), "key"]))
+            write_site_tables(*account_pages(set(snap["key"])), person_names, arcgis_email,
+                              {norm(k): p for k, p in person_of.items() if p in counts}, counts)
             # Every account with its removal group, for the lists behind the Proposed removals table (full edition only)
             data["group_lists"] = [[a.username, a.classification, a.unit, a.sub_unit if isinstance(a.sub_unit, str) else "", int(a.items),
                                     r(a.feature_gb, 3), r(a.file_gb, 3), date_str(a.last_login), status_label.get(a.projected_status, "not assessed"),

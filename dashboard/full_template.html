@@ -262,7 +262,7 @@ const who = (id, none) => {
   const others = !p ? "" : key !== p ? `<br><a class="small" href="#people">one of ${(D.person_n || {})[p]} accounts of ${esc(p)}</a>`
     : `<br><a class="small" href="#people">has ${(D.person_n || {})[p]} accounts</a>`;
   const label = name ? `${esc(name)}<br><span class="muted small">${esc(id)}</span>` : esc(id);
-  const page = (D.acct || {})[String(id).trim().toLowerCase()] ? `<a href="#a:${encodeURIComponent(String(id).trim().toLowerCase())}">${label}</a>` : label;
+  const page = hasAccountPage(String(id).trim().toLowerCase()) ? `<a href="#a:${encodeURIComponent(String(id).trim().toLowerCase())}">${label}</a>` : label;
   return page + belongs + others;
 };
 // two decimals (0.01 GB = 10 MB) below 100 GB, one above, so small holdings are visible
@@ -489,7 +489,7 @@ function route() {
     document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#removals"));
     renderGroup(h.slice(4)); scrollTo(0, 0); return;
   }
-  if (h.startsWith("a:") && (D.acct || {})[h.slice(2)]) {
+  if (h.startsWith("a:") && hasAccountPage(h.slice(2))) {
     document.querySelectorAll("section.panel").forEach(s => { s.hidden = s.id !== "acctview"; });
     document.querySelectorAll("nav a").forEach(a => a.classList.remove("active"));
     renderAccount(h.slice(2)); scrollTo(0, 0); return;
@@ -519,19 +519,23 @@ function currentTiles(el, C, inUnit) {
 /* Views served from the database (21 October 2026): on the website, a view asks /api/v1/<view> for its data, which
    the site computes from its read-only copy of the database. Opened as a file, or if the site cannot answer, the view
    uses the data built into this page. Each view is asked for once per page load. */
-const viewCache = {};
-async function viewData(name) {
-  if (!(name in viewCache)) {
-    viewCache[name] = null;
-    if (location.protocol.startsWith("http")) {
+const SERVED = location.protocol.startsWith("http"), viewCache = {};
+async function apiData(path) {   // the site's answer, or null (opened as a file, not found, or the site cannot answer)
+  if (!(path in viewCache)) {
+    viewCache[path] = null;
+    if (SERVED) {
       try {
-        const res = await fetch(`/api/v1/${name}?edition=${D.edition}`, { credentials: "same-origin", headers: { Accept: "application/json" } });
-        if (res.ok) viewCache[name] = { ...(await res.json()), source: "database" };
+        const res = await fetch(`/api/v1/${path}?edition=${D.edition}`, { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (res.ok) viewCache[path] = { ...(await res.json()), source: "database" };
       } catch (e) { /* use the built-in data */ }
     }
   }
-  return viewCache[name] || { ...D, source: "page" };
+  return viewCache[path];
 }
+async function viewData(name) { return (await apiData(name)) || { ...D, source: "page" }; }
+// Every account has a page on the site (full edition); a page opened as a file has only the accounts built into it.
+const ACCOUNT_KEYS = new Set((D.group_lists || []).map(r => String(r[0]).trim().toLowerCase()));
+const hasAccountPage = k => (D.acct || {})[k] || (SERVED && ACCOUNT_KEYS.has(k));
 
 function recycleBin(B) {
   $("#bin-block").hidden = !B || !B.items;
@@ -722,8 +726,17 @@ function accounts() {
     [...D.roles.map(r => ({ k: "Role: " + r.role, accounts: r.accounts })), ...D.login_types.map(r => ({ k: "Login: " + r.login_type, accounts: r.accounts }))].sort((a, b) => b.accounts - a.accounts));
 }
 
-function renderAccount(key) {
-  const a = D.acct[key];
+async function renderAccount(key) {
+  // from the site's database; the page's own data when opened as a file
+  const A = await apiData(`account/${encodeURIComponent(key)}`);
+  if (A) for (const k of ["names", "accounts", "person_of", "person_n"]) D[k] = Object.assign(D[k] || {}, A[k]);
+  const a = A ? A.account : (D.acct || {})[key];
+  $("#acctview").dataset.source = A ? "database" : "page";
+  if (!a) {
+    $("#av-title").textContent = key; $("#av-lede").textContent = "This account's page could not be loaded. Try again, or sign in again.";
+    for (const s of ["#av-tiles", "#av-details", "#av-items"]) $(s).innerHTML = "";
+    $("#av-others-block").hidden = true; return;
+  }
   $("#av-title").innerHTML = (D.names || {})[key.replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1")] ? esc(D.names[key.replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1")]) : esc(a.user);
   $("#av-lede").innerHTML = `${esc(a.user)} &middot; ${a.login === "arcgis" ? "ArcGIS login" : "NetID login"} &middot; ${pill(a.classification)} &middot; projected ${pill(a.projected)}`;
   $("#av-tiles").innerHTML = [["Items", n(a.items), ""], ["Feature storage", gb(a.feature_gb), ""], ["File storage", gb(a.file_gb), ""], ["Groups owned", n(a.groups_owned), ""]]
@@ -734,11 +747,11 @@ function renderAccount(key) {
     ["Supervisor", who(a.supervisor, "none on record")], ["Last sign-in", a.last_login || '<span class="muted">never</span>'],
     ["Delete status now", esc(a.status)], ["Projected status (this run's dry run)", pill(a.projected)], ["Removal group", esc(a.group)]];
   $("#av-details").innerHTML = `<table><tbody>${rows.map(([k, v]) => `<tr><th scope="row">${k}</th><td class="wtext">${v}</td></tr>`).join("")}</tbody></table>`;
-  const others = a.person ? Object.entries(D.acct).filter(([k, o]) => o.person === a.person && k !== key) : [];
+  const others = A ? A.others : a.person ? Object.entries(D.acct).filter(([k, o]) => o.person === a.person && k !== key) : [];
   $("#av-others-block").hidden = !others.length;
   table("#av-others", [{ h: "Account", f: ([k, o]) => who(o.user), w: 1 }, { h: "Login", f: ([k, o]) => o.login === "arcgis" ? "ArcGIS login" : "NetID" },
     { h: "Items", n: 1, f: ([k, o]) => n(o.items) }, { h: "Feature", n: 1, f: ([k, o]) => gb(o.feature_gb) }, { h: "Projected status", f: ([k, o]) => pill(o.projected) }], others);
-  const its = (D.acct_items || {})[key] || [];
+  const its = A ? A.items : (D.acct_items || {})[key] || [];
   $("#av-items-h").textContent = a.items > its.length ? `Items (largest ${n(its.length)} of ${n(a.items)})` : `Items (${n(its.length)})`;
   table("#av-items", [{ h: "Item", f: x => itemLink(x[0], x[1]), w: 1 }, { h: "Type", f: x => esc(x[2]) }, { h: "Feature", n: 1, f: x => gb(x[3]) }, { h: "File", n: 1, f: x => gb(x[4]) },
     { h: "Sharing", f: x => esc(x[5]) }, { h: "Last viewed", f: x => x[6] || '<span class="muted">never</span>' }, { h: "Created", f: x => esc(x[7]) }], its);

@@ -3,9 +3,9 @@
 The daily job runs this last, after the dashboards are built. The website (web/app.py) opens the copy read-only;
 it never sees the job's own database, which only the job may write (DuckDB allows a single writer).
 
-What goes in: the snapshots (SNAP_*), the newest member and item reports, RUNS, and the person tables the
-dashboard names people from (HIST_Supervisors, HIST_AccountNetIDs, HIST_PersonNames), plus the STATUS_CHANGES
-view. The rest of the history, and the raw directory and Entra lookups, stay with the job.
+What goes in: the snapshots (SNAP_*), the newest member and item reports, RUNS, the person tables the dashboard
+names people from (HIST_Supervisors, HIST_AccountNetIDs, HIST_PersonNames), the account pages the builder writes
+(DASH_*), plus the STATUS_CHANGES view. The rest of the history, and the raw directory and Entra lookups, stay with the job.
 
 The copy is written beside its final name and moved into place, so the site never opens a half-written file.
 
@@ -27,7 +27,9 @@ from build_dashboard_data import STATUS_CHANGES_VIEW  # noqa: E402
 
 SERVE_NAME = "agol-serve.duckdb"
 TABLES = ["SNAP_MemberStatus", "SNAP_UnitUsage", "SNAP_RemovalSummary", "RUNS",
-          "HIST_Supervisors", "HIST_AccountNetIDs", "HIST_PersonNames", "_meta"]
+          "HIST_Supervisors", "HIST_AccountNetIDs", "HIST_PersonNames", "_meta",
+          # the account pages, written by dashboard/build_full_dashboard.py
+          "DASH_Account", "DASH_AccountItems", "DASH_Names", "DASH_ArcgisLogins", "DASH_PersonOf"]
 NEWEST = ["OrganizationMembers_", "OrganizationItems_"]
 
 

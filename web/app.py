@@ -210,6 +210,22 @@ def view_data(request: Request, view: str, edition: str = "full"):
     return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/v1/{view}/{key}")
+def keyed_view_data(request: Request, view: str, key: str, edition: str = "full"):
+    """One item of a view, e.g. an account's page. 404 when there is no such item or the edition does not show it."""
+    require_user(request)
+    if view not in queries.KEYED_VIEWS or edition not in DATA:
+        raise HTTPException(status_code=404)
+    cur = serving_db()
+    try:
+        data = queries.KEYED_VIEWS[view](cur, named=edition == "full", key=key)
+    finally:
+        cur.close()
+    if data is None:
+        raise HTTPException(status_code=404)
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/status")
 async def status(request: Request):
     require_user(request)

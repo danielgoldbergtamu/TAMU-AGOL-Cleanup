@@ -115,4 +115,34 @@ def overview(con, named):
             "trend": trend, "classes": classes, "removal": removal, "recycle_bin": recycle_bin}
 
 
+def norm(v):
+    """An account or email as the name tables key it: lower case, without AGOL's _suffix (as the builder's norm)."""
+    return re.sub(r"(@[^@\s]+?)_[a-z0-9]+$", r"\1", (v or "").strip().lower())
+
+
+ITEM_COLUMNS = ["item_id", "title", "item_type", "feature_gb", "file_gb", "share", "last_viewed", "created"]
+
+
+def account(con, named, key):
+    """One account's page (full edition only): details, items (largest first, up to 250), the same person's other
+    accounts, and the names, ArcGIS-login owners and people the page shows for them. None if there is no such account."""
+    if not named or not has(con, "DASH_Account"):
+        return None
+    key = (key or "").strip().lower()
+    found = rows(con, "SELECT * FROM DASH_Account WHERE key = ?", [key])
+    if not found:
+        return None
+    a = found[0]
+    items = [[x[c] for c in ITEM_COLUMNS] for x in rows(con, "SELECT * FROM DASH_AccountItems WHERE key = ? ORDER BY n", [key])]
+    others = rows(con, "SELECT * FROM DASH_Account WHERE person = ? AND key <> ? ORDER BY feature_gb DESC, key", [a["person"], key]) if a["person"] else []
+    ids = sorted({norm(x) for x in [a["user"], a["supervisor"], *(o["user"] for o in others)] if x})
+    pick = lambda table, col: {k: v for k, v in con.execute(f"SELECT key, {col} FROM {table} WHERE key IN (SELECT UNNEST(?))", [ids]).fetchall()}
+    person_of = {k: (p, n) for k, p, n in con.execute("SELECT key, person, accounts FROM DASH_PersonOf WHERE key IN (SELECT UNNEST(?))", [ids]).fetchall()}
+    return {"key": key, "account": {k: v for k, v in a.items() if k != "key"}, "items": items,
+            "others": [[o["key"], {k: v for k, v in o.items() if k != "key"}] for o in others],
+            "names": pick("DASH_Names", "name"), "accounts": pick("DASH_ArcgisLogins", "email"),
+            "person_of": {k: p for k, (p, _) in person_of.items()}, "person_n": {p: n for p, n in person_of.values()}}
+
+
 VIEWS = {"overview": overview}
+KEYED_VIEWS = {"account": account}   # /api/v1/<view>/<key>
