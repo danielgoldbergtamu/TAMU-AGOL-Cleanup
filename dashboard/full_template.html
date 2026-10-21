@@ -35,6 +35,7 @@ section.panel.stack[hidden] { display: none; }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
 .card > .lede:last-child, .card > .note:last-child { margin-bottom: 0; }
 .grid2.cards { gap: 14px; align-items: stretch; }
+.card.statuses { margin-bottom: 0; padding: 16px 18px; }
 h2 { font-size: 1.15rem; margin: 0 0 4px; }
 .lede { color: var(--ink-2); margin: 0 0 14px; max-width: 85ch; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 16px; }
@@ -96,21 +97,21 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
   <a href="#content">Content</a><a href="#accounts">Accounts</a><a href="#people">Multi-Account Holders</a><a href="#quality">Data quality</a><a href="#runs">Runs</a>
 </nav>
 
-<section class="panel" id="unitview" hidden aria-live="polite">
-  <p class="crumbs" id="uv-crumbs"></p>
-  <h2 id="uv-title"></h2><p class="lede" id="uv-lede"></p>
-  <div class="tiles" id="uv-tiles"></div>
-  <h3>Current accounts</h3><p class="note">People who have left are mostly counted under "Unit unknown", because a unit is rarely recorded for them, so this view shows current accounts without a share of the unit's members.</p>
-  <div class="tiles" id="uv-curtiles"></div>
-  <h3>Proposed removals in this unit (by owner) <a class="small" href="#status-key">what the statuses mean</a></h3><div class="tw" id="uv-removal"></div>
-  <div id="uv-subs-block"><h3 id="uv-subs-h">Departments</h3><p class="note">▸ opens a department to its degrees; select a name to open its view. A department includes its staff and the students in the degrees it offers.</p>
+<section class="panel stack" id="unitview" hidden aria-live="polite">
+  <div class="card"><p class="crumbs" id="uv-crumbs"></p>
+  <h2 id="uv-title"></h2><p class="lede" id="uv-lede"></p></div>
+  <div class="card"><h3>Storage and members</h3><div class="tiles" id="uv-tiles"></div></div>
+  <div class="card"><h3>Current accounts</h3><p class="note">People who have left are mostly counted under "Unit unknown", because a unit is rarely recorded for them, so this view shows current accounts without a share of the unit's members.</p>
+    <div class="tiles" id="uv-curtiles"></div></div>
+  <div class="card"><h3>Proposed removals in this unit (by owner) <a class="small" href="#status-key">what the statuses mean</a></h3><div class="tw" id="uv-removal"></div></div>
+  <div class="card" id="uv-subs-block"><h3 id="uv-subs-h">Departments</h3><p class="note">▸ opens a department to its degrees; select a name to open its view. A department includes its staff and the students in the degrees it offers.</p>
     <div class="chart" id="uv-subchart"></div><div class="tw" id="uv-subtable"></div></div>
-  <h3>Feature storage by run</h3><div class="tw" id="uv-trend"></div>
-  <h3>Largest layers</h3><div class="tw" id="uv-items"></div>
-  <h3>Largest owners</h3><div class="tw" id="uv-users"></div>
-  <div class="grid2"><div><h3>Members by Entra classification</h3><div class="tw" id="uv-classes"></div></div>
-    <div><h3>Feature storage by item type</h3><div class="tw" id="uv-types"></div></div></div>
-  <h3>Last viewed</h3><div class="tw" id="uv-viewed"></div>
+  <div class="card"><h3>Feature storage by run</h3><div class="tw" id="uv-trend"></div></div>
+  <div class="card"><h3>Largest layers</h3><div class="tw" id="uv-items"></div></div>
+  <div class="card"><h3>Largest owners</h3><div class="tw" id="uv-users"></div></div>
+  <div class="grid2 cards"><div class="card"><h3>Members by Entra classification</h3><div class="tw" id="uv-classes"></div></div>
+    <div class="card"><h3>Feature storage by item type</h3><div class="tw" id="uv-types"></div></div></div>
+  <div class="card"><h3>Last viewed</h3><div class="tw" id="uv-viewed"></div></div>
 </section>
 
 <section class="panel stack" id="overview">
@@ -123,9 +124,10 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
     <div class="tiles" id="bintiles"></div><div class="tw" id="bintable"></div></div>
 </section>
 
-<section class="panel" id="removals"><h2>Proposed removals</h2>
-  <p class="lede">From this run's delete-status dry run. <b>Proposals for review only.</b> Nothing is removed until the maintainer has reviewed a specific set and approved it in writing, and no content before a verified backup.</p>
-  <div class="statuses" id="status-key">
+<section class="panel stack" id="removals">
+  <div class="card"><h2>Proposed removals</h2>
+  <p class="lede">From this run's delete-status dry run. <b>Proposals for review only.</b> Nothing is removed until the maintainer has reviewed a specific set and approved it in writing, and no content before a verified backup.</p></div>
+  <div class="card statuses" id="status-key">
     <h3>What the statuses mean</h3>
     <dl>
       <dt><span class="pill kept">0 · kept</span></dt>
@@ -137,21 +139,23 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
     </dl>
     <p class="note">Every run re-checks every member: anyone found current again goes back to 0, whatever their status. <b>Projected status</b> is what this run's dry run would set; the stored status changes only on a real run, which has not been run yet.</p>
   </div>
-  <div class="chart" id="path"></div><div class="tw" id="removal"></div>
-  <p class="note">Empty accounts need no backup (nothing to keep, and an SSO account is recreated at its next login). Status 2 content waits for the verified backup. Status 1 reaches status 2 after 30 days. Administrators and non-standard roles are listed for review and never counted as removable.</p>
+  <div class="card"><h3>Feature storage, now and after each group</h3><div class="chart" id="path"></div></div>
+  <div class="card"><h3>Removal groups</h3><div class="tw" id="removal"></div>
+  <p class="note">Empty accounts need no backup (nothing to keep, and an SSO account is recreated at its next login). Status 2 content waits for the verified backup. Status 1 reaches status 2 after 30 days. Administrators and non-standard roles are listed for review and never counted as removable.</p></div>
 </section>
 
-<section class="panel" id="review"><h2>Review</h2>
-  <p class="lede">What to look at before approving anything: how concentrated current members' storage is, and the empty-account list with its cautions.</p>
-  <h3>Current members' storage</h3><p class="note" id="rv-gap"></p>
-  <div class="tw" id="rv-concentration"></div>
-  <h3>Current members by feature storage (top 150)</h3>
+<section class="panel stack" id="review">
+  <div class="card"><h2>Review</h2>
+  <p class="lede">What to look at before approving anything: how concentrated current members' storage is, and the empty-account list with its cautions.</p></div>
+  <div class="card"><h3>Current members' storage</h3><p class="note" id="rv-gap"></p>
+  <div class="tw" id="rv-concentration"></div></div>
+  <div class="card"><h3>Current members by feature storage (top 150)</h3>
   <p class="note">Running total in the "Cumulative" column. Neither earlier per-person quota figure (20 MB, 57 MB) is settled.</p>
-  <div class="tw" id="rv-top"></div>
-  <h3>Accounts that own nothing</h3>
+  <div class="tw" id="rv-top"></div></div>
+  <div class="card"><h3>Accounts that own nothing</h3>
   <p class="note"><b>Group 1</b> (proposed for removal without a backup) is only the empty accounts of people who have <b>left</b>, with a <b>NetID login</b> and <b>no groups owned</b> (rule of 20 October 2026). Current people's empty accounts are kept; empty ArcGIS-login accounts and group owners take the normal 30-day flag. <b>Cautions:</b> an <b>ArcGIS login</b> account is not recreated at the next sign-in, the way a NetID account is; an account that <b>owns groups</b> cannot be deleted until the groups are reassigned; <b>current members</b> and anyone who <b>signed in within 90 days</b> are listed by the empty-account rule regardless of affiliation. Accounts with no caution are the cleanest first set.</p>
-  <div class="grid2"><div class="tw" id="rv-cautions"></div><div class="tw" id="rv-by"></div></div>
-  <div id="rv-list-block">
+  <div class="grid2"><div class="tw" id="rv-cautions"></div><div class="tw" id="rv-by"></div></div></div>
+  <div class="card" id="rv-list-block"><h3>The list</h3>
     <div class="controls"><label for="rv-filter">Show <select id="rv-filter"><option value="group1">Group 1 only</option><option value="none">No caution only</option><option value="all">All</option>
       <option value="ArcGIS">ArcGIS login</option><option value="owns groups">Owns groups</option><option value="current member">Current member</option><option value="signed in">Signed in within 90 days</option></select></label>
       <label for="rv-q">Search <input id="rv-q" type="search" placeholder="name, unit, classification"></label><span>Showing <b id="rv-shown"></b></span></div>
@@ -159,53 +163,81 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
   </div>
 </section>
 
-<section class="panel" id="units"><h2>Colleges, agencies and departments</h2>
-  <p class="lede">Current members by college (students) or department (employees); departed members by the department last recorded for them, or a group their content is shared with.</p>
+<section class="panel stack" id="units">
+  <div class="card"><h2>Colleges, agencies and departments</h2>
+  <p class="lede">Current members by college (students) or department (employees); departed members by the department last recorded for them, or a group their content is shared with.</p></div>
+  <div class="card"><h3>By college</h3>
   <div class="controls"><label for="metric">Measure <select id="metric"><option value="feature_gb">Feature storage (GB)</option><option value="file_gb">File storage (GB)</option><option value="members">Members</option><option value="items">Items</option></select></label>
     <span class="legend"><span><span class="chip" style="background:var(--current)"></span>Current</span><span><span class="chip" style="background:var(--departed)"></span>Departed</span></span></div>
-  <div class="chart" id="unitchart"></div><h3>Colleges, departments and degrees (▸ opens a college to its departments, and a department to its degrees; select a name to open its view)</h3><div class="tw"><table id="unittable"></table></div>
-  <h3>Feature storage by unit and run</h3><div class="tw" id="unittrend"></div>
+  <div class="chart" id="unitchart"></div></div>
+  <div class="card"><h3>Colleges, departments and degrees (▸ opens a college to its departments, and a department to its degrees; select a name to open its view)</h3><div class="tw"><table id="unittable"></table></div></div>
+  <div class="card"><h3>Feature storage by unit and run</h3><div class="tw" id="unittrend"></div></div>
 </section>
 
-<section class="panel" id="items"><h2>Largest layers</h2><p class="lede">The 100 items using the most feature storage, with their owner's status and the owner's projected delete status (<a href="#status-key">what the statuses mean</a>).</p><div class="tw" id="topitems"></div></section>
-<section class="panel" id="users"><h2>Largest owners</h2><p class="lede">The 100 accounts holding the most feature storage, with each one's projected delete status (<a href="#status-key">what the statuses mean</a>).</p><div class="tw" id="topusers"></div></section>
+<section class="panel stack" id="items">
+  <div class="card"><h2>Largest layers</h2><p class="lede">The 100 items using the most feature storage, with their owner's status and the owner's projected delete status (<a href="#status-key">what the statuses mean</a>).</p></div>
+  <div class="card"><div class="tw" id="topitems"></div></div>
+</section>
+<section class="panel stack" id="users">
+  <div class="card"><h2>Largest owners</h2><p class="lede">The 100 accounts holding the most feature storage, with each one's projected delete status (<a href="#status-key">what the statuses mean</a>).</p></div>
+  <div class="card"><div class="tw" id="topusers"></div></div>
+</section>
 
-<section class="panel" id="changes"><h2>Changes since the previous run</h2><p class="lede" id="changes-lede"></p><div class="tw" id="changecounts"></div><div class="tw" id="changelist"></div></section>
+<section class="panel stack" id="changes">
+  <div class="card"><h2>Changes since the previous run</h2><p class="lede" id="changes-lede"></p></div>
+  <div class="card"><h3>What changed</h3><div class="tw" id="changecounts"></div></div>
+  <div class="card" id="changelist-card"><div class="tw" id="changelist"></div></div>
+</section>
 
-<section class="panel" id="content"><h2>Content</h2><p class="lede">What kind of content uses the storage, and how long since anyone viewed it.</p>
-  <div class="grid2"><div><h3>Feature storage by item type (top 12)</h3><div class="chart" id="types"></div></div><div><h3>Last viewed, by owner status (feature GB)</h3><div class="tw" id="viewed"></div></div></div></section>
+<section class="panel stack" id="content">
+  <div class="card"><h2>Content</h2><p class="lede">What kind of content uses the storage, and how long since anyone viewed it.</p></div>
+  <div class="grid2 cards"><div class="card"><h3>Feature storage by item type (top 12)</h3><div class="chart" id="types"></div></div><div class="card"><h3>Last viewed, by owner status (feature GB)</h3><div class="tw" id="viewed"></div></div></div>
+</section>
 
-<section class="panel" id="accounts"><h2>Accounts</h2><p class="lede">How long since members last signed in, and the account mix.</p>
-  <div class="grid2"><div><h3>Last sign-in by classification</h3><div class="tw" id="logins"></div></div><div><h3>Roles and login types</h3><div class="tw" id="roles"></div></div></div></section>
+<section class="panel stack" id="accounts">
+  <div class="card"><h2>Accounts</h2><p class="lede">How long since members last signed in, and the account mix.</p></div>
+  <div class="grid2 cards"><div class="card"><h3>Last sign-in by classification</h3><div class="tw" id="logins"></div></div><div class="card"><h3>Roles and login types</h3><div class="tw" id="roles"></div></div></div>
+</section>
 
-<section class="panel" id="acctview" hidden aria-live="polite">
-  <p class="crumbs"><a href="#users">Largest owners</a> &rsaquo; account</p>
+<section class="panel stack" id="acctview" hidden aria-live="polite">
+  <div class="card"><p class="crumbs"><a href="#users">Largest owners</a> &rsaquo; account</p>
   <h2 id="av-title"></h2><p class="lede" id="av-lede"></p>
-  <div class="tiles" id="av-tiles"></div>
-  <h3>Details</h3><div class="tw" id="av-details"></div>
-  <div id="av-others-block"><h3>Other accounts of the same person</h3><div class="tw" id="av-others"></div></div>
-  <h3 id="av-items-h">Items</h3><p class="note">Select an item to open it in ArcGIS Online (sign-in needed).</p><div class="tw" id="av-items"></div></section>
-<section class="panel" id="changeview" hidden aria-live="polite">
-  <p class="crumbs"><a href="#changes">Changes</a> &rsaquo; accounts</p>
+  <div class="tiles" id="av-tiles"></div></div>
+  <div class="card"><h3>Details</h3><div class="tw" id="av-details"></div></div>
+  <div class="card" id="av-others-block"><h3>Other accounts of the same person</h3><div class="tw" id="av-others"></div></div>
+  <div class="card"><h3 id="av-items-h">Items</h3><p class="note">Select an item to open it in ArcGIS Online (sign-in needed).</p><div class="tw" id="av-items"></div></div>
+</section>
+<section class="panel stack" id="changeview" hidden aria-live="polite">
+  <div class="card"><p class="crumbs"><a href="#changes">Changes</a> &rsaquo; accounts</p>
   <h2 id="cv-title"></h2><p class="lede" id="cv-lede"></p>
-  <div class="tiles" id="cv-tiles"></div>
-  <p class="note">History: each account's Entra classification and projected delete status in every snapshot, oldest first. Select a column header to sort.</p>
-  <div class="tw" id="cv-table"></div></section>
-<section class="panel" id="groupview" hidden aria-live="polite">
-  <p class="crumbs"><a href="#removals">Proposed removals</a> &rsaquo; group</p>
+  <div class="tiles" id="cv-tiles"></div></div>
+  <div class="card"><h3>The accounts</h3><p class="note">History: each account's Entra classification and projected delete status in every snapshot, oldest first. Select a column header to sort.</p>
+  <div class="tw" id="cv-table"></div></div>
+</section>
+<section class="panel stack" id="groupview" hidden aria-live="polite">
+  <div class="card"><p class="crumbs"><a href="#removals">Proposed removals</a> &rsaquo; group</p>
   <h2 id="gv-title"></h2><p class="lede" id="gv-lede"></p>
-  <div class="tiles" id="gv-tiles"></div>
-  <p class="note">Proposals for review only. Select a column header to sort; select a person to open their page where there is one.</p>
-  <div class="tw" id="gv-table"></div></section>
-<section class="panel" id="people"><h2>Multi-Account Holders</h2>
+  <div class="tiles" id="gv-tiles"></div></div>
+  <div class="card"><h3>The accounts</h3><p class="note">Proposals for review only. Select a column header to sort; select a person to open their page where there is one.</p>
+  <div class="tw" id="gv-table"></div></div>
+</section>
+<section class="panel stack" id="people">
+  <div class="card"><h2>Multi-Account Holders</h2>
   <p class="lede">Each account belongs to the person whose NetID it matched in Entra: an ArcGIS login with any username (a class or project account, for example) belongs to the person on its email. A person's accounts are assessed together: if the person is current, all their accounts are kept; if they have left, their flagged accounts reach status 2 together.</p>
-  <div class="tiles" id="pp-tiles"></div>
-  <h3>Current accounts among them</h3><p class="note">Accounts that are current themselves (found in Entra with a current affiliation). An account kept only because another account of the same person is current is not counted here.</p>
-  <div class="tiles" id="pp-curtiles"></div>
-  <h3>Current people with extra ArcGIS-login accounts (to consolidate)</h3><p class="note">Kept, not flagged. Ask the person to move the content into their NetID account.</p><div class="tw" id="pp-cons"></div>
-  <h3>Everyone with more than one account (largest 400 by storage)</h3><div class="tw" id="pp-all"></div></section>
-<section class="panel" id="quality"><h2>Data quality</h2><p class="lede">Gaps that affect the numbers above.</p><div class="tw" id="qualitytable"></div></section>
-<section class="panel" id="runs"><h2>Runs</h2><p class="lede">The most recent pipeline runs recorded in the database.</p><div class="tw" id="runtable"></div></section>
+  <div class="tiles" id="pp-tiles"></div></div>
+  <div class="card"><h3>Current accounts among them</h3><p class="note">Accounts that are current themselves (found in Entra with a current affiliation). An account kept only because another account of the same person is current is not counted here.</p>
+  <div class="tiles" id="pp-curtiles"></div></div>
+  <div class="card"><h3>Current people with extra ArcGIS-login accounts (to consolidate)</h3><p class="note">Kept, not flagged. Ask the person to move the content into their NetID account.</p><div class="tw" id="pp-cons"></div></div>
+  <div class="card"><h3>Everyone with more than one account (largest 400 by storage)</h3><div class="tw" id="pp-all"></div></div>
+</section>
+<section class="panel stack" id="quality">
+  <div class="card"><h2>Data quality</h2><p class="lede">Gaps that affect the numbers above.</p></div>
+  <div class="card"><div class="tw" id="qualitytable"></div></div>
+</section>
+<section class="panel stack" id="runs">
+  <div class="card"><h2>Runs</h2><p class="lede">The most recent pipeline runs recorded in the database.</p></div>
+  <div class="card"><div class="tw" id="runtable"></div></div>
+</section>
 </div>
 <div id="tip" hidden></div>
 
@@ -246,7 +278,7 @@ const DEFS = {
 const pill = s => `<span class="pill ${slug(s)}"${DEFS[s] ? ` title="${esc(DEFS[s])}"` : ""}>${esc(s)}</span>`;
 function keyBox() {
   const row = k => `<dt>${pill(k)}</dt><dd>${esc(DEFS[k].replace(/^(Owner status|Projected status( \d)?): /, ""))}</dd>`;
-  return `<details class="keybox" open><summary>Key: what the labels mean</summary><div class="keycols">
+  return `<details class="keybox"><summary>Key: what the labels mean</summary><div class="keycols">
     <div><h4>Owner status (Entra, this run)</h4><dl>${["current", "no current affiliation", "not in Entra", "not looked up"].map(row).join("")}</dl></div>
     <div><h4>Projected delete status (this run's dry run)</h4><dl>${["kept", "flagged", "listed for removal", "not assessed"].map(row).join("")}</dl></div></div></details>`;
 }
@@ -487,6 +519,7 @@ function recycleBin() {
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
   table("#bintable", [{ h: "Item", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" },
     ...(D.edition === "full" ? [{ h: "Owner", f: r => who(r.owner), w: 1 }] : []), { h: "Owner's unit", f: r => unitLink(r.unit), w: 1 },
+    { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : '<span class="muted">not recorded</span>', w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) }], B.list.slice(0, 50));
 }
 
@@ -589,6 +622,9 @@ function changes() {
   const prev = D.trend.length > 1 ? D.trend[D.trend.length - 2].as_of : null;
   $("#changes-lede").textContent = prev ? `Between the snapshot of ${prev} and this one (${D.as_of}).` : "This is the first snapshot; changes appear from the next run.";
   const chgKey = r => encodeURIComponent([r.kind, r.from, r.to].join("|"));
+  $("#changelist-card").hidden = !D.change_list.length;
+  if (!D.change_counts.length) $("#changecounts").innerHTML = prev
+    ? '<p class="note">No account changed its Entra classification, unit or projected delete status between these two snapshots.</p>' : "";
   if (D.change_counts.length) table("#changecounts", [{ h: "What changed", f: r => D.change_rows ? `<a class="u" href="#chg:${chgKey(r)}">${esc(r.kind)}</a>` : esc(r.kind) }, { h: "From", f: r => pill(r.from) }, { h: "To", f: r => pill(r.to) },
     { h: "Accounts", n: 1, f: r => n(r.accounts) }, { h: "Their feature storage", n: 1, f: r => gb(r.feature_gb) }], D.change_counts.sort((a, b) => b.accounts - a.accounts));
   if (D.change_list.length) { $("#changelist").insertAdjacentHTML("beforebegin", "<h3>Accounts that changed (largest 300 by storage)</h3>");

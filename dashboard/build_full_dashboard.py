@@ -185,10 +185,12 @@ def main():
         """What is in the AGOL recycle bin: counts, and the items (largest first; titles and owners only when named)."""
         b = binned.sort_values("feature_gb", ascending=False)
         owner_unit = dict(zip(snap["key"], snap["unit"]))
+        owner_sub = {k: (s if (named or st == "current") and isinstance(s, str) else "") for k, s, st in zip(snap["key"], snap["sub_unit"], snap["status"])}
         return {"items": len(b), "feature_gb": r(b["feature_gb"].sum(), 3), "file_gb": r(b["file_gb"].sum(), 3),
                 "owners": int(b["owner"].str.strip().str.lower().nunique()),
                 "list": [{"title": x.title if named else f"{x.item_type} #{i + 1}", "id": x.item_id if named else "", "type": x.item_type,
                           "owner": x.owner if named else "", "unit": owner_unit.get(str(x.owner).strip().lower(), "Unit unknown"),
+                          "sub_unit": owner_sub.get(str(x.owner).strip().lower(), ""),
                           "feature_gb": r(x.feature_gb, 3), "file_gb": r(x.file_gb, 3)}
                          for i, x in enumerate(b.head(200).itertuples(index=False))]}
 
