@@ -1,0 +1,55 @@
+name: Build and publish the image
+
+# One image for the web app and the daily job (Dockerfile). It holds code only: no data, lookup tables or secrets,
+# which the cluster provides at run time. Tags, as in the GeoInnovation monorepo:
+#   stable      only from main: what production pins to
+#   <branch>    every other branch
+#   sha-<sha>   every build, so a deployment can pin an exact one
+on:
+  push:
+    branches: [main, duckdb]
+    paths-ignore: ["docs/**", "**/*.md", "guides/**"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/tamu-agol-cleanup
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to build if organization data is in the tree
+        run: python3 tools/leak_check.py --all
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=stable,enable=${{ github.ref_name == 'main' }}
+            type=raw,value=${{ github.ref_name }},enable=${{ github.ref_name != 'main' }}
+            type=sha
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

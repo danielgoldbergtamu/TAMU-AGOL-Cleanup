@@ -1,0 +1,139 @@
+# AGOL cleanup dashboard: the web app (Deployment) and the daily job (CronJob), sharing one volume.
+#
+# A starting point for the private cluster-config repository, not applied from here. Values marked CHANGE depend
+# on the cluster. Secrets and the private lookup tables are NOT in this file: create them as described in
+# deploy/k8s/README.md. The job is read-only in ArcGIS Online; nothing here removes anything.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agol-cleanup
+---
+# The database, run folders, built dashboards and the Entra inbox. Both pods mount it: the job writes, the web app
+# reads. ReadWriteMany if the storage class supports it; with ReadWriteOnce, pin both pods to one node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agol-data
+  namespace: agol-cleanup
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: longhorn          # CHANGE: the cluster's storage class
+  resources:
+    requests:
+      storage: 20Gi                   # the database is about 200 MB; reports and run folders grow by ~250 MB a run
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agol-daily
+  namespace: agol-cleanup
+spec:
+  schedule: "30 6 * * *"              # 06:30 every day
+  timeZone: America/Chicago
+  concurrencyPolicy: Forbid           # never two runs at once (DuckDB has one writer)
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      backoffLimit: 0                 # a failed run is looked at, not retried blindly
+      activeDeadlineSeconds: 14400    # 4 hours at most
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
+          containers:
+            - name: daily
+              image: ghcr.io/danielgoldbergtamu/tamu-agol-cleanup:stable   # or pin sha-<commit>
+              command: ["python", "pipeline_daily.py"]
+              envFrom:
+                - secretRef: {name: agol-cleanup-secrets}
+              env:
+                - {name: ORG_EMAIL_DOMAIN, value: tamu.edu}
+                - {name: AGOL_USERNAME_SUFFIX, value: _tamu}
+                - {name: DELETE_STATUS_TABLE_NAME, value: DeleteStatus}
+                - {name: WHITELISTED_ENTRAID_GROUPS_TABLE_NAME, value: Whitelisted_EntraID_Groups}
+              volumeMounts:
+                - {name: data, mountPath: /data}
+                - {name: config, mountPath: /config, readOnly: true}
+              resources:
+                requests: {cpu: 500m, memory: 2Gi}
+                limits: {memory: 6Gi}
+          volumes:
+            - name: data
+              persistentVolumeClaim: {claimName: agol-data}
+            - name: config
+              configMap: {name: agol-cleanup-config}
+          imagePullSecrets:
+            - name: ghcr-pull           # only if the GHCR package is private
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agol-web
+  namespace: agol-cleanup
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: agol-web}
+  template:
+    metadata:
+      labels: {app: agol-web}
+    spec:
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
+      containers:
+        - name: web
+          image: ghcr.io/danielgoldbergtamu/tamu-agol-cleanup:stable
+          ports: [{containerPort: 8000}]
+          envFrom:
+            - secretRef: {name: agol-cleanup-web}
+          env:
+            - {name: PUBLIC_URL, value: "https://agol-cleanup.example.tamu.edu"}   # CHANGE: the site's address
+          volumeMounts:
+            - {name: data, mountPath: /data, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: agol-data}
+      imagePullSecrets:
+        - name: ghcr-pull
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agol-web
+  namespace: agol-cleanup
+spec:
+  selector: {app: agol-web}
+  ports: [{port: 80, targetPort: 8000}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agol-web
+  namespace: agol-cleanup
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure   # CHANGE: as the other sites on the cluster
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik           # CHANGE
+  rules:
+    - host: agol-cleanup.example.tamu.edu                         # CHANGE
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: agol-web, port: {number: 80}}
+  tls:
+    - hosts: [agol-cleanup.example.tamu.edu]                      # CHANGE
+      secretName: agol-cleanup-tls                                # CHANGE: or the cluster's certificate setup
