@@ -177,6 +177,26 @@ def people(con, named):
     return stored_view(con, named, "people")
 
 
+def base(con, named):
+    """What every page needs as it opens: the small sections (totals, units, top items and owners, runs, ...) and
+    the index of college, department and degree views (without their tables)."""
+    return stored_view(con, named, "base")
+
+
+def review(con, named):
+    """The Review page: current members' storage, the accounts that own nothing, and the list."""
+    return stored_view(con, named, "review")
+
+
+def scope(con, named, key):
+    """One college, department or degree view, with its tables (largest layers and owners, trend, ...)."""
+    edition = "full" if named else "published"
+    found = con.execute("SELECT data FROM DASH_Scope WHERE edition = ? AND key = ?", [edition, key]).fetchone() if has(con, "DASH_Scope") else None
+    if not found:
+        return None
+    return {"edition": edition, "scope": json.loads(found[0]), **(lookups_in(con, found[0]) if named else {})}
+
+
 # which accounts each row of the removal table lists (the same rules as the page's groupMatcher)
 GROUP_RULES = [("1.", lambda g, items: g.startswith("1.")), ("2.", lambda g, items: g.startswith("2.")),
                ("3.|empty", lambda g, items: g.startswith("3.") and items == 0), ("3.", lambda g, items: g.startswith("3.") and items > 0),
@@ -197,5 +217,5 @@ def group(con, named, key):
     return {"edition": "full", "group": label, "rows": found, **lookups(con, [x["user"] for x in found] + [x["supervisor"] for x in found])}
 
 
-VIEWS = {"overview": overview, "history": history, "people": people}
-KEYED_VIEWS = {"account": account, "group": group}   # /api/v1/<view>/<key>
+VIEWS = {"base": base, "overview": overview, "history": history, "people": people, "review": review}
+KEYED_VIEWS = {"account": account, "group": group, "scope": scope}   # /api/v1/<view>/<key>

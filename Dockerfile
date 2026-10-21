@@ -1,5 +1,5 @@
 # One image for both parts: the web app (default command) and the daily job (command: python pipeline_daily.py).
-# Holds code only: the database, reports, built dashboards, the private lookup tables and every secret are given
+# Holds code only: the database, reports, the private lookup tables and every secret are given
 # to the container at run time (volumes and environment), never built in.
 FROM python:3.12-slim
 

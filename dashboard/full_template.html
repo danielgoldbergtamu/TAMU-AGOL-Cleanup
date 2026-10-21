@@ -247,7 +247,7 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 <div id="tip" hidden></div>
 
 <script>
-const D = /*__DATA__*/null;
+const D = /*__DATA__*/null;   // {edition}; the rest comes from the site at start()
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // A person's name (full edition only, from Entra or the AGOL account) above their account or email.
@@ -344,12 +344,16 @@ function hbars(el, rows, f, opt = {}) {
 }
 
 /* Unit and department views. */
-const SCOPES = D.scopes || {};
+let SCOPES = {};   // the index of unit views (no tables): key -> unit, sub, degree, totals, departments or degrees
 const UNIT_KEY = {}, SUB_KEY = {}, DEG_KEY = {}, DEG_DEPT = {};
-for (const [k, s] of Object.entries(SCOPES)) {
-  if (s.kind === "unit") UNIT_KEY[s.unit] = k;
-  else if (s.kind === "degree") DEG_KEY[s.unit + "\u0001" + s.sub + "\u0001" + s.degree] = k;
-  else SUB_KEY[s.unit + "\u0001" + s.sub] = k;
+function indexScopes(index) {
+  SCOPES = index || {};
+  for (const [k, s] of Object.entries(SCOPES)) {
+    if (s.kind === "unit") UNIT_KEY[s.unit] = k;
+    else if (s.kind === "degree") DEG_KEY[s.unit + "\u0001" + s.sub + "\u0001" + s.degree] = k;
+    else SUB_KEY[s.unit + "\u0001" + s.sub] = k;
+  }
+  for (const s of Object.values(SCOPES)) if (s.kind === "sub" && s.sub !== "College-level" && s.sub !== "major not given" && !NOT_COLLEGES.has(s.unit)) (DEPT_UNITS[s.sub] = DEPT_UNITS[s.sub] || []).push(s.unit);
 }
 const degreeLabel = g => { const nm = (D.degree_names || {})[g]; return nm ? `${g} (${nm})` : g; };
 /* Where a raw department-or-major value sits: [department, child], child a degree code or "Faculty & staff". */
@@ -359,7 +363,6 @@ const childKey = (u, d, g) => DEG_KEY[u + "\u0001" + d + "\u0001" + g];
    Engineering, degrees in Agriculture) links each part to the others. */
 const NOT_COLLEGES = new Set(["Unmapped departments", "Unit unknown", "No unit recorded"]);
 const DEPT_UNITS = {};
-for (const s of Object.values(SCOPES)) if (s.kind === "sub" && s.sub !== "College-level" && s.sub !== "major not given" && !NOT_COLLEGES.has(s.unit)) (DEPT_UNITS[s.sub] = DEPT_UNITS[s.sub] || []).push(s.unit);
 const alsoIn = (u, d) => (DEPT_UNITS[d] || []).filter(x => x !== u).map(x => ` <a class="small" href="#${SUB_KEY[x + "\u0001" + d]}">also in ${esc(x)}</a>`).join("");
 const unitLink = u => UNIT_KEY[u] ? `<a class="u" href="#${UNIT_KEY[u]}">${esc(u)}</a>` : esc(u);
 /* A sub_unit is a department, or a degree code placed under its department (shown as "Department › CODE"). */
@@ -397,6 +400,12 @@ function deptTree(sc, subs, st = { k: "total", dir: -1 }, open = new Set()) {
     if (open.has(d)) open.delete(d); else open.add(d); deptTree(sc, subs, st, open); });
 }
 
+async function showScope(key) {
+  const X = adopt(await apiData(`scope/${encodeURIComponent(key)}`));
+  $("#unitview").dataset.source = X ? "database" : "index";
+  if (X && decodeURIComponent(location.hash.slice(1)) === key) renderScope(X.scope);   // still the view asked for
+  else if (!X) $("#uv-lede").textContent = "This view could not be loaded. Try again, or sign in again.";
+}
 function renderScope(sc) {
   const isUnit = sc.kind === "unit", isDegree = sc.kind === "degree";
   const deptLink = SUB_KEY[sc.unit + "\u0001" + sc.sub] ? `<a href="#${SUB_KEY[sc.unit + "\u0001" + sc.sub]}">${esc(sc.sub)}</a>` : esc(sc.sub);
@@ -448,8 +457,9 @@ function renderScope(sc) {
 
 /* Review section. */
 function sortableTable(el, cols, rows) { table(el, cols, rows); }   // every table sorts now
-function review() {
-  const R = D.review; if (!R) return;
+async function review() {
+  const X = await viewData("review"), R = X.review; if (!R) return;
+  $("#review").dataset.source = X.source;
   $("#rv-gap").innerHTML = `${n(R.current_owners)} current members own content, ${gb(R.current_gb)} in all. After every proposed removal, the organization would still be <b>${gb(Math.max(R.gap_gb, 0))}</b> over the ${D.limits.feature_gb} GB limit`
     + (R.owners_for_gap ? `, and the top <b>${n(R.owners_for_gap)}</b> current ${R.owners_for_gap === 1 ? "owner holds" : "owners hold"} that much on their own.` : ".");
   table("#rv-concentration", [{ h: "", k: "label" }, { h: "People", n: 1, f: r => n(r.people) }, { h: "Feature storage", n: 1, f: r => gb(r.feature_gb) },
@@ -500,7 +510,7 @@ function route() {
   const view = sc ? "unitview" : panels.some(s => s.id === h) ? h : inside ? inside.id : "overview";
   panels.forEach(s => { s.hidden = s.id !== view; });
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + (sc ? "units" : view)));
-  if (sc) renderScope(sc); else if (REDRAW[view]) REDRAW[view]();
+  if (sc) showScope(h); else if (REDRAW[view]) REDRAW[view]();
   if (inside) document.getElementById(h).scrollIntoView(); else scrollTo(0, 0);
 }
 addEventListener("hashchange", route);
@@ -538,7 +548,7 @@ function adopt(X) {   // the names, ArcGIS-login owners and people that came wit
 }
 async function viewData(name) { return adopt(await apiData(name)) || { ...D, source: "page" }; }
 // Every account has a page on the site (full edition); a page opened as a file has only the accounts built into it.
-const ACCOUNT_KEYS = new Set((D.group_lists || []).map(r => String(r[0]).trim().toLowerCase()));
+const ACCOUNT_KEYS = new Set();   // filled from the site's answer (full edition)
 const hasAccountPage = k => (D.acct || {})[k] || (SERVED && ACCOUNT_KEYS.has(k));
 
 function recycleBin(B) {
@@ -845,14 +855,31 @@ function quality() {
     { h: "Started", f: r => esc((r.started_at || "").slice(0, 16)) }, { h: "Finished", f: r => esc((r.finished_at || "").slice(0, 16).replace("NaT", "")) }], D.runs);
 }
 
-$("#edition").textContent = D.edition === "full" ? "Full: names people, signed-in access only" : "People and layer titles hidden";
-$("#edition").className = "badge " + D.edition;
-$("#asof").textContent = `Data as of ${D.as_of}; built ${D.generated}. Sources: ${D.sources}.`;
-try { const m = localStorage.getItem("agol-dash-metric"); if (m) $("#metric").value = m; } catch (e) {}
-$("#metric").addEventListener("change", () => { try { localStorage.setItem("agol-dash-metric", $("#metric").value); } catch (e) {} units(); });
-for (const id of ["overview", "review", "items", "users", "changes", "unitview"]) {
-  const lede = document.querySelector(`#${id} .lede`); if (lede) lede.insertAdjacentHTML("afterend", keyBox());
+/* The page holds no data (21 October 2026): it asks the site, which reads its copy of the database. Opened as a
+   file, or when the sign-in has run out, it says so instead. */
+function noData(html) {
+  document.querySelectorAll("nav, section.panel").forEach(e => { e.hidden = true; });
+  $("#asof").innerHTML = html;
 }
-overview(); removals(); review(); units(); tops(); changes(); content(); accounts(); peopleView(); quality(); route();
+async function start() {
+  $("#edition").textContent = D.edition === "full" ? "Full: names people, signed-in access only" : "People and layer titles hidden";
+  $("#edition").className = "badge " + D.edition;
+  if (!SERVED) return noData("This page gets its data from the AGOL Cleanup site. Open it there: " +
+    '<a href="https://agol-cleanup.geoservices.tamu.edu/">agol-cleanup.geoservices.tamu.edu</a> (Texas A&amp;M networks, sign-in required).');
+  $("#asof").textContent = "Loading…";
+  const B = adopt(await apiData("base"));
+  if (!B) return noData('The data could not be loaded. Your sign-in may have run out: <a href="/login">sign in again</a>.');
+  Object.assign(D, B.base);
+  indexScopes(D.scope_index);
+  for (const k of D.account_keys || []) ACCOUNT_KEYS.add(k);
+  $("#asof").textContent = `Data as of ${D.as_of}; built ${D.generated}. Sources: ${D.sources}.`;
+  try { const m = localStorage.getItem("agol-dash-metric"); if (m) $("#metric").value = m; } catch (e) {}
+  $("#metric").addEventListener("change", () => { try { localStorage.setItem("agol-dash-metric", $("#metric").value); } catch (e) {} units(); });
+  for (const id of ["overview", "review", "items", "users", "changes", "unitview"]) {
+    const lede = document.querySelector(`#${id} .lede`); if (lede) lede.insertAdjacentHTML("afterend", keyBox());
+  }
+  overview(); removals(); review(); units(); tops(); changes(); content(); accounts(); peopleView(); quality(); route();
+}
+start();
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(route, 150); });
 </script>

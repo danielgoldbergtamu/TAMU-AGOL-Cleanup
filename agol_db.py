@@ -10,7 +10,7 @@
 #   AGOL_REPORTS_DIR  run folders and report files  (default reports/)
 #   AGOL_CONFIG_DIR   reviewed lookup tables: department-to-unit, degree-to-department, college-level names
 #                     (default private/config/; organization data, so never in the public repository)
-#   AGOL_OUTPUT_DIR   built dashboards and their data, for the web app (default data/)
+#   AGOL_OUTPUT_DIR   the web app's read-only copy of the database, and last_run.json (default data/)
 
 import os
 import re

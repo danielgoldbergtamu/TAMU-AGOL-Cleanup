@@ -12,7 +12,7 @@ Steps, each its own process (DuckDB has one writer at a time; each step opens th
   4. delete status     a DRY RUN only: projected statuses, nothing saved (TAMU_AGOL_DeleteStatus.py --dry-run)
   5. removal summary   counts and review lists (tools/removal_summary.py)
   6. snapshot          one row per member for this report date (dashboard/build_dashboard_data.py)
-  7. dashboards        both editions and their data, for the web app (dashboard/build_full_dashboard.py)
+  7. dashboards        both editions' data, into the database (DASH_* tables) (dashboard/build_full_dashboard.py)
   8. publish-db        the website's read-only copy of the tables it reads (tools/publish_serving_db.py)
 
 Nothing here changes or removes anything in ArcGIS Online, and it never saves a delete status: removals stay a

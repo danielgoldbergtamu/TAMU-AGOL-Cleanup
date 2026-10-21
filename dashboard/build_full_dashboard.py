@@ -1,17 +1,18 @@
-"""Builds the full AGOL cleanup dashboard in two editions from the catalog database.
+"""Builds the AGOL cleanup dashboard's data, in two editions, from the catalog database.
 
-  AGOL_Cleanup_Dashboard_FULL.html       names people and layer titles. Written to AGOL_OUTPUT_DIR (default
-                                         data/, git-ignored), never committed, never published.
-  AGOL_Cleanup_Dashboard.html            the same page with every person and layer title replaced by its
-                                         unit and a rank. Safe to publish.
+  full edition        names people and layer titles; signed-in access only.
+  published edition   every person and layer title replaced by its unit and a rank. Refused if it would name anyone.
+
+The data goes into the database (DASH_* tables), from which tools/publish_serving_db.py makes the website's
+read-only copy and the website answers /api/v1/... (web/app.py, dashboard/queries.py). The page itself,
+full_template.html, holds no data; the website serves it. Each edition's data is also written to AGOL_OUTPUT_DIR
+(default data/, git-ignored) as dashboard_full.json and dashboard_published.json, for checking.
 
 Reads: the newest snapshot (SNAP_MemberStatus, SNAP_UnitUsage), the newest item report table, the
 STATUS_CHANGES view, RUNS, HIST_Supervisors, and the newest removal_summary.csv under reports/runs.
 Run it after a run's snapshot has been written:
 
     python dashboard/build_full_dashboard.py
-
-Each edition's data is also written on its own (dashboard_full.json, dashboard_published.json) for the web app.
 """
 import collections
 import csv
@@ -39,8 +40,12 @@ COLLEGE_LEVEL = os.path.join(db.config_dir(), "college_level_departments.csv")
 STAFF, COLLEGE_LEVEL_DEPT = "Faculty & staff", "College-level"
 sys.path.insert(0, HERE)
 from build_dashboard_data import COLLEGE_UNIT  # noqa: E402  (the directory college -> unit table the snapshot uses)
-# the views the page takes whole, kept per edition for the website (DASH_ViewData), and the group list's columns
-SITE_VIEWS = ("history", "people")
+# The website's data (21 October 2026): the page is a shell, and asks the site for everything. Per edition, the
+# views the page takes whole (DASH_ViewData; "base" is every small section and the index of unit views), each
+# college, department and degree view (DASH_Scope), and, full edition only, the account pages and group lists.
+SITE_VIEWS = ("history", "people", "review")
+NOT_IN_BASE = {"history", "people", "review", "scopes", "acct", "acct_items", "group_lists", "names", "accounts", "person_of", "person_n"}
+SCOPE_TABLES = {"top_items", "top_users", "types", "viewed", "trend", "removal", "classes", "current_accounts"}   # left out of the index
 GROUP_LIST_COLUMNS = ["user", "classification", "unit", "sub_unit", "items", "feature_gb", "file_gb", "last_login", "projected",
                       "supervisor", "rgroup", "login"]
 STANDARD_ROLES = {"Publisher with Notebooks", "User", "Viewer", "Data Editor", "Publisher"}
@@ -561,11 +566,12 @@ def main():
                 "runs": runs.astype(str).to_dict("records"), "scopes": scopes(named), "review": review(named), "degree_names": degree_names, "degree_notes": unconfirmed,
                 "placement": {f"{u}\u0001{s}": list(place(u, s)) for u, s in set(zip(snap_unit, snap_sub)) | set(zip(items["item_unit"], items["item_sub"])) if s}, "people": people(named)}
 
-    def write_site_tables(acct, acct_items, names, logins, person_of_multi, counts, group_list, views):
+    def write_site_tables(acct, acct_items, names, logins, person_of_multi, counts, group_list, views, scopes_):
         """What the website's API reads, written to the database each run (replacing the last run's) and copied to
         the site's read-only copy by tools/publish_serving_db.py: every account's page (/api/v1/account/<name>),
         every account with its removal group (/api/v1/group/<group>, full edition), and the views the page takes
-        whole, as each edition shows them (DASH_ViewData: /api/v1/history, /api/v1/people)."""
+        whole, as each edition shows them (DASH_ViewData: /api/v1/base, history, people, review), and each
+        college, department and degree view (DASH_Scope: /api/v1/scope/<key>)."""
         accounts = pd.DataFrame([{"key": k, **v} for k, v in acct.items()])
         item_rows = pd.DataFrame([[k, n_, *x] for k, xs in acct_items.items() for n_, x in enumerate(xs)],
                                  columns=["key", "n", "item_id", "title", "item_type", "feature_gb", "file_gb", "share", "last_viewed", "created"])
@@ -576,7 +582,9 @@ def main():
                   "DASH_PersonOf": pd.DataFrame([(k, p, int(counts[p])) for k, p in sorted(person_of_multi.items())], columns=["key", "person", "accounts"]),
                   "DASH_GroupList": pd.DataFrame(group_list, columns=GROUP_LIST_COLUMNS),
                   "DASH_ViewData": pd.DataFrame([(ed, v, json.dumps(d, separators=(",", ":"), default=str)) for ed, vs in views.items() for v, d in vs.items()],
-                                                columns=["edition", "view", "data"])}
+                                                columns=["edition", "view", "data"]),
+                  "DASH_Scope": pd.DataFrame([(ed, k, json.dumps(s, separators=(",", ":"), default=str)) for ed, ss in scopes_.items() for k, s in ss.items()],
+                                             columns=["edition", "key", "data"])}
         with db.connect() as c:
             c.execute("BEGIN")
             for name, df in tables.items():
@@ -584,12 +592,10 @@ def main():
             c.execute("COMMIT")
         print("site tables: " + ", ".join(f"{k} {len(v)}" for k, v in tables.items()))
 
-    template = open(os.path.join(HERE, "full_template.html"), encoding="utf-8").read()
-    site_views = {}
+    site_views, site_scopes = {}, {}
     out = db.output_dir()
     os.makedirs(out, exist_ok=True)
-    for named, path in ((True, os.path.join(out, "AGOL_Cleanup_Dashboard_FULL.html")),
-                        (False, os.path.join(out, "AGOL_Cleanup_Dashboard.html"))):
+    for named in (True, False):
         data = edition(named)
         if named:
             # only the names of people who appear on the page
@@ -615,11 +621,10 @@ def main():
                     data["names"].setdefault(norm(k), person_names[norm(k)])
                 if norm(k) in arcgis_email:
                     data["accounts"].setdefault(norm(k), arcgis_email[norm(k)])
-        page = template.replace("/*__DATA__*/null", json.dumps(data, separators=(",", ":"), default=str))
         if not named:
-            # The published edition must name no one. Refuse to write it if any account name, or any
+            # The published edition must name no one. Refuse to write its data if any account name, or any
             # NetID-length local part, appears as a word, except words that are part of a unit name.
-            words = set(re.findall(r"[a-z0-9._@-]{3,}", page.lower()))
+            words = set(re.findall(r"[a-z0-9._@-]{3,}", json.dumps(data, default=str).lower()))
             unit_words = set(re.findall(r"[a-z0-9._@-]{3,}", " ".join(map(str, list(snap["unit"]) + list(snap["sub_unit"]))).lower()))
             usernames = set(snap["username"].str.strip().str.lower())
             locals_ = {u.split("@")[0] for u in usernames if len(u.split("@")[0]) >= 5}
@@ -627,14 +632,17 @@ def main():
             if leaked:
                 raise SystemExit(f"REFUSED: the published edition would name {len(leaked)} accounts (e.g. {leaked[:3]}). Not written.")
             print("published edition checked: no account names")
-        json_path = os.path.join(out, f"dashboard_{data['edition']}.json")   # the same data, for the web app
-        for target, content in ((path, page), (json_path, json.dumps(data, separators=(",", ":"), default=str))):
-            # written beside, then moved into place: the site never serves a half-written file
-            open(target + ".tmp", "w", encoding="utf-8").write(content)
-            os.replace(target + ".tmp", target)
-        print(f"wrote {path} ({len(page) / 1024:.0f} KB, {data['edition']} edition)")
-        site_views[data["edition"]] = {k: data[k] for k in SITE_VIEWS}
-    write_site_tables(*site["pages"], person_names, arcgis_email, site["person_of"], site["counts"], site["group_list"], site_views)
+        json_path = os.path.join(out, f"dashboard_{data['edition']}.json")   # the same data, for checking
+        open(json_path + ".tmp", "w", encoding="utf-8").write(json.dumps(data, separators=(",", ":"), default=str))
+        os.replace(json_path + ".tmp", json_path)
+        print(f"wrote {json_path} ({os.path.getsize(json_path) / 1024:.0f} KB, {data['edition']} edition)")
+        base = {k: v for k, v in data.items() if k not in NOT_IN_BASE}
+        base["scope_index"] = {k: {f: v for f, v in s.items() if f not in SCOPE_TABLES} for k, s in data["scopes"].items()}
+        if named:   # which accounts have a page, for the links
+            base["account_keys"] = sorted(snap["key"])
+        site_views[data["edition"]] = {"base": base, **{k: data[k] for k in SITE_VIEWS}}
+        site_scopes[data["edition"]] = data["scopes"]
+    write_site_tables(*site["pages"], person_names, arcgis_email, site["person_of"], site["counts"], site["group_list"], site_views, site_scopes)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
-"""The dashboard site: serves the built dashboards and their data, behind Auth0 sign-in.
+"""The dashboard site: the dashboard page and its data, behind Auth0 sign-in.
 
-The daily job (pipeline_daily.py) writes the dashboards into AGOL_OUTPUT_DIR, and beside them a read-only copy of
-the tables the site reads (agol-serve.duckdb, tools/publish_serving_db.py). The pages ask /api/v1/<view> for each
-view's data, computed from that copy (dashboard/queries.py); a page opened as a file uses the data built into it.
-This app never opens a database for writing and never touches ArcGIS Online.
+The page (dashboard/full_template.html, in the image) holds no data. It asks /api/v1/<view> for each view, which
+this app answers from the read-only copy of the database that the daily job (pipeline_daily.py) leaves in
+AGOL_OUTPUT_DIR (agol-serve.duckdb, tools/publish_serving_db.py; the queries are dashboard/queries.py). This app
+never opens a database for writing and never touches ArcGIS Online.
 
 Who gets in (fail closed: with neither setting, nobody does):
   AUTH_REQUIRED_ROLE    a role the Auth0 user must have, read from the ID token's AUTH_ROLES_CLAIM
@@ -14,7 +14,7 @@ Settings (environment, or .env beside the repository):
   AUTH_ROLES_CLAIM      the custom claim that carries roles (an Auth0 Action adds it), e.g. https://example.edu/roles
   SESSION_SECRET        a long random string that signs the session cookie
   PUBLIC_URL            the site's address, for the sign-in callback and sign-out (e.g. https://agol.example.edu)
-  AGOL_OUTPUT_DIR       where the daily job writes the dashboards (default data/)
+  AGOL_OUTPUT_DIR       where the daily job leaves the site's copy of the database (default data/)
   AGOL_WEB_ENV=development and AUTH_DISABLED=1         sign-in off, for a local test only; refused otherwise
 
 Run:  uvicorn web.app:app --host 0.0.0.0 --port 8000
@@ -31,15 +31,15 @@ import duckdb
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(REPO, ".env"), override=False)
 
 OUTPUT_DIR = os.environ.get("AGOL_OUTPUT_DIR") or os.path.join(REPO, "data")
-PAGES = {"full": "AGOL_Cleanup_Dashboard_FULL.html", "published": "AGOL_Cleanup_Dashboard.html"}
-DATA = {"full": "dashboard_full.json", "published": "dashboard_published.json"}
+TEMPLATE = os.path.join(REPO, "dashboard", "full_template.html")
+EDITIONS = ("full", "published")
 SERVE_DB = "agol-serve.duckdb"
 sys.path.insert(0, os.path.join(REPO, "dashboard"))
 import queries  # noqa: E402
@@ -147,13 +147,14 @@ async def logout(request: Request):
 def output_file(name):
     path = os.path.join(OUTPUT_DIR, name)
     if not os.path.exists(path):
-        raise HTTPException(status_code=503, detail="The dashboards have not been built yet; the daily job writes them.")
+        raise HTTPException(status_code=503, detail="No data yet: the daily job has not published the site's database.")
     return path
 
 
 def page(request: Request, edition: str):
     user = require_user(request)
-    html = open(output_file(PAGES[edition]), encoding="utf-8").read()
+    # the page carries only its edition; it asks /api/v1/... for everything else
+    html = open(TEMPLATE, encoding="utf-8").read().replace("/*__DATA__*/null", json.dumps({"edition": edition}))
     who = (user.get("email") or user.get("name") or "").replace("<", "&lt;")
     bar = (f'<div style="position:fixed;top:6px;right:10px;font:12px system-ui;opacity:.8;z-index:99">{who} · '
            f'<a href="/{"published" if edition == "full" else ""}">{"published edition" if edition == "full" else "full edition"}</a> · '
@@ -171,14 +172,6 @@ async def full(request: Request):
 @app.get("/published", response_class=HTMLResponse)
 async def published(request: Request):
     return page(request, "published")
-
-
-@app.get("/api/dashboard")
-async def dashboard_data(request: Request, edition: str = "full"):
-    require_user(request)
-    if edition not in DATA:
-        raise HTTPException(status_code=404)
-    return FileResponse(output_file(DATA[edition]), media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
 _db = {"mtime": None, "con": None}
@@ -200,7 +193,7 @@ def serving_db():
 def view_data(request: Request, view: str, edition: str = "full"):
     """One view's data from the database. A plain def: FastAPI runs it in a worker thread, as DuckDB blocks."""
     require_user(request)
-    if view not in queries.VIEWS or edition not in DATA:
+    if view not in queries.VIEWS or edition not in EDITIONS:
         raise HTTPException(status_code=404)
     cur = serving_db()
     try:
@@ -216,7 +209,7 @@ def view_data(request: Request, view: str, edition: str = "full"):
 def keyed_view_data(request: Request, view: str, key: str, edition: str = "full"):
     """One item of a view, e.g. an account's page. 404 when there is no such item or the edition does not show it."""
     require_user(request)
-    if view not in queries.KEYED_VIEWS or edition not in DATA:
+    if view not in queries.KEYED_VIEWS or edition not in EDITIONS:
         raise HTTPException(status_code=404)
     cur = serving_db()
     try:
@@ -237,5 +230,5 @@ async def status(request: Request):
 
 @app.get("/healthz")
 async def healthz():
-    """For the cluster's probes: up, and whether the dashboards exist. No data."""
-    return {"ok": True, "dashboards": all(os.path.exists(os.path.join(OUTPUT_DIR, f)) for f in PAGES.values())}
+    """For the cluster's probes: up, and whether the daily job has published the site's database. No data."""
+    return {"ok": True, "database": os.path.exists(os.path.join(OUTPUT_DIR, SERVE_DB))}
