@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--groups", required=True, help="group inventory folder (groups.csv, group_items.csv)")
     parser.add_argument("--out", required=True, help="folder for dashboard_data_<date>.json")
     parser.add_argument("--changes", help="DeleteStatus_changes.csv of this run's dry run (projected status)")
+    parser.add_argument("--removal-summary", help="removal_summary.csv of this run (tools/removal_summary.py), kept with the snapshot")
     parser.add_argument("--again", action="store_true", help="write a snapshot even if this date already has one")
     parser.add_argument("--no-snapshot", action="store_true", help="only write the dashboard JSON")
     args = parser.parse_args()
@@ -233,6 +234,13 @@ def main():
         db.write(con, "SNAP_UnitUsage", units_frame, mode="append",
                  types={"run_id": "VARCHAR", "as_of": "DATE", "status": "VARCHAR", "unit": "VARCHAR", "sub_unit": "VARCHAR",
                         "members": "INTEGER", "owners": "INTEGER", "items": "INTEGER", "feature_gb": "DOUBLE", "file_gb": "DOUBLE"})
+        if args.removal_summary:   # the removal groups, so the website can read them from the database
+            removal = pd.read_csv(args.removal_summary)[["group", "users", "items", "feature_gb", "file_gb"]]
+            removal.insert(0, "as_of", as_of)
+            removal.insert(0, "run_id", run.run_id)
+            db.write(con, "SNAP_RemovalSummary", removal, mode="append",
+                     types={"run_id": "VARCHAR", "as_of": "DATE", "group": "VARCHAR", "users": "INTEGER", "items": "INTEGER",
+                            "feature_gb": "DOUBLE", "file_gb": "DOUBLE"})
         con.execute(STATUS_CHANGES_VIEW)
         run.note(as_of=as_of, members=len(members_frame), unit_rows=len(units_frame), changes_file=args.changes)
         print(f"snapshot {run.run_id}: {len(members_frame)} members and {len(units_frame)} unit rows for {as_of}")

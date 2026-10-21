@@ -516,8 +516,24 @@ function currentTiles(el, C, inUnit) {
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
 }
 
-function recycleBin() {
-  const B = D.recycle_bin;
+/* Views served from the database (21 October 2026): on the website, a view asks /api/v1/<view> for its data, which
+   the site computes from its read-only copy of the database. Opened as a file, or if the site cannot answer, the view
+   uses the data built into this page. Each view is asked for once per page load. */
+const viewCache = {};
+async function viewData(name) {
+  if (!(name in viewCache)) {
+    viewCache[name] = null;
+    if (location.protocol.startsWith("http")) {
+      try {
+        const res = await fetch(`/api/v1/${name}?edition=${D.edition}`, { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (res.ok) viewCache[name] = { ...(await res.json()), source: "database" };
+      } catch (e) { /* use the built-in data */ }
+    }
+  }
+  return viewCache[name] || { ...D, source: "page" };
+}
+
+function recycleBin(B) {
   $("#bin-block").hidden = !B || !B.items;
   if (!B || !B.items) return;
   $("#bintiles").innerHTML = [["In the recycle bin", gb(B.feature_gb), `${n(B.items)} items, ${n(B.owners)} owners`], ["File storage in the bin", gb(B.file_gb), ""]]
@@ -528,22 +544,24 @@ function recycleBin() {
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) }], B.list.slice(0, 50));
 }
 
-function overview() {
-  recycleBin();
-  const t = D.total, L = D.limits, cl = Object.fromEntries(D.classes.map(c => [c.classification, c]));
-  const cur = (cl["current"]?.feature_gb || 0), rem = D.removal.filter(r => /^[12]\./.test(r.group)).reduce((a, r) => a + +r.feature_gb, 0);
+async function overview() {
+  const O = await viewData("overview");
+  $("#overview").dataset.source = O.source;
+  recycleBin(O.recycle_bin);
+  const t = O.total, L = O.limits, cl = Object.fromEntries(O.classes.map(c => [c.classification, c]));
+  const cur = (cl["current"]?.feature_gb || 0), rem = O.removal.filter(r => /^[12]\./.test(r.group)).reduce((a, r) => a + +r.feature_gb, 0);
   const tiles = [["Feature storage", gb(t.feature_gb), `limit ${L.feature_gb} GB`, t.feature_gb > L.feature_gb ? "over" : "good"],
     ["Accounts", n(t.accounts), `limit ${n(L.accounts)}`, t.accounts > L.accounts ? "over" : "good"],
     ["Held by current members", gb(cur), `${(100 * cur / t.feature_gb).toFixed(0)}% of storage`, ""],
     ["Proposed, once backup is verified", gb(rem), "status 2 and empty accounts", ""],
     ["Items", n(t.items), `${n(t.owners)} owners`, ""], ["File storage", gb(t.file_gb), "not counted against the limit", ""]];
-  currentTiles("#curtiles", D.current_accounts);
+  currentTiles("#curtiles", O.current_accounts);
   $("#tiles").innerHTML = tiles.map(([l, v, nn, c]) => `<div class="tile ${c}"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
-  hbars("#trend", D.trend.map(r => ({ label: r.as_of, a: r.current_feature_gb, b: r.departed_feature_gb,
+  hbars("#trend", O.trend.map(r => ({ label: r.as_of, a: r.current_feature_gb, b: r.departed_feature_gb,
     tipHtml: `<b>${r.as_of}</b><br>Current ${gb(r.current_feature_gb)}<br>Departed ${gb(r.departed_feature_gb)}<br>${n(r.accounts)} accounts` })), gb, { limit: L.feature_gb, labelW: 100 });
   const order = ["current", "no current affiliation", "not in Entra", "not looked up"];
   table("#classes", [{ h: "Classification", f: r => pill(r.classification) }, { h: "Accounts", k: "accounts", n: 1, f: r => n(r.accounts) },
-    { h: "Owners", n: 1, f: r => n(r.owners) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }], D.classes.sort((a, b) => order.indexOf(a.classification) - order.indexOf(b.classification)));
+    { h: "Owners", n: 1, f: r => n(r.owners) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }], O.classes.sort((a, b) => order.indexOf(a.classification) - order.indexOf(b.classification)));
 }
 
 function removals() {

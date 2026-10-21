@@ -13,6 +13,7 @@ Steps, each its own process (DuckDB has one writer at a time; each step opens th
   5. removal summary   counts and review lists (tools/removal_summary.py)
   6. snapshot          one row per member for this report date (dashboard/build_dashboard_data.py)
   7. dashboards        both editions and their data, for the web app (dashboard/build_full_dashboard.py)
+  8. publish-db        the website's read-only copy of the tables it reads (tools/publish_serving_db.py)
 
 Nothing here changes or removes anything in ArcGIS Online, and it never saves a delete status: removals stay a
 separate, manual step after the maintainer's written approval (CLAUDE.md, "Deleting").
@@ -109,9 +110,11 @@ def main():
         changes = os.path.join(run.dir, "deletestatus-dryrun", "DeleteStatus_changes.csv")
         removal = run.path("removal")
         step("removal", ["tools/removal_summary.py", "--changes", changes, "--out", removal], run)
-        step("snapshot", ["dashboard/build_dashboard_data.py", "--groups", groups, "--out", run.path("dashboard-data"), "--changes", changes], run)
+        step("snapshot", ["dashboard/build_dashboard_data.py", "--groups", groups, "--out", run.path("dashboard-data"), "--changes", changes,
+                          "--removal-summary", os.path.join(removal, "removal_summary.csv")], run)
         step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", os.path.join(removal, "removal_summary.csv"),
                             "--groups", groups], run)
+        step("publish-db", ["tools/publish_serving_db.py"], run)
 
         status = {"run_id": run.run_id, "started": started.isoformat(timespec="seconds"),
                   "finished": datetime.datetime.now().isoformat(timespec="seconds"), "groups": groups}

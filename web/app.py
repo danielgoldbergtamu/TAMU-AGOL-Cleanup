@@ -1,7 +1,9 @@
 """The dashboard site: serves the built dashboards and their data, behind Auth0 sign-in.
 
-The daily job (pipeline_daily.py) writes the dashboards into AGOL_OUTPUT_DIR; this app only reads those files. It
-never opens the database for writing and never touches ArcGIS Online.
+The daily job (pipeline_daily.py) writes the dashboards into AGOL_OUTPUT_DIR, and beside them a read-only copy of
+the tables the site reads (agol-serve.duckdb, tools/publish_serving_db.py). The pages ask /api/v1/<view> for each
+view's data, computed from that copy (dashboard/queries.py); a page opened as a file uses the data built into it.
+This app never opens a database for writing and never touches ArcGIS Online.
 
 Who gets in (fail closed: with neither setting, nobody does):
   AUTH_REQUIRED_ROLE    a role the Auth0 user must have, read from the ID token's AUTH_ROLES_CLAIM
@@ -21,7 +23,10 @@ import json
 import os
 import secrets
 import sys
+import threading
 import time
+
+import duckdb
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -35,6 +40,9 @@ load_dotenv(os.path.join(REPO, ".env"), override=False)
 OUTPUT_DIR = os.environ.get("AGOL_OUTPUT_DIR") or os.path.join(REPO, "data")
 PAGES = {"full": "AGOL_Cleanup_Dashboard_FULL.html", "published": "AGOL_Cleanup_Dashboard.html"}
 DATA = {"full": "dashboard_full.json", "published": "dashboard_published.json"}
+SERVE_DB = "agol-serve.duckdb"
+sys.path.insert(0, os.path.join(REPO, "dashboard"))
+import queries  # noqa: E402
 
 DEV = os.environ.get("AGOL_WEB_ENV") == "development"
 AUTH_DISABLED = os.environ.get("AUTH_DISABLED") == "1"
@@ -171,6 +179,35 @@ async def dashboard_data(request: Request, edition: str = "full"):
     if edition not in DATA:
         raise HTTPException(status_code=404)
     return FileResponse(output_file(DATA[edition]), media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+_db = {"mtime": None, "con": None}
+_db_lock = threading.Lock()
+
+
+def serving_db():
+    """A cursor on the newest read-only copy. The daily job replaces the file; the next request opens the new one
+    (the old connection is left to close when its last cursor is done)."""
+    path = output_file(SERVE_DB)
+    mtime = os.path.getmtime(path)
+    with _db_lock:
+        if _db["mtime"] != mtime:
+            _db["con"], _db["mtime"] = duckdb.connect(path, read_only=True), mtime
+        return _db["con"].cursor()
+
+
+@app.get("/api/v1/{view}")
+def view_data(request: Request, view: str, edition: str = "full"):
+    """One view's data from the database. A plain def: FastAPI runs it in a worker thread, as DuckDB blocks."""
+    require_user(request)
+    if view not in queries.VIEWS or edition not in DATA:
+        raise HTTPException(status_code=404)
+    cur = serving_db()
+    try:
+        data = queries.VIEWS[view](cur, named=edition == "full")
+    finally:
+        cur.close()
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/status")
