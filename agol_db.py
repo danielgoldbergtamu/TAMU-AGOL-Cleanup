@@ -37,13 +37,43 @@ def output_dir():
     return os.environ.get("AGOL_OUTPUT_DIR") or os.path.join(SCRIPT_DIR, "data")
 
 
+# The only privileges the service account may have: viewing users, groups and items (as administrator, which the
+# organization reports need, and as user), and basemaps. Nothing that creates, changes, shares or deletes.
+READ_ONLY_PRIVILEGES = frozenset({
+    "portal:admin:viewUsers", "portal:admin:viewGroups", "portal:admin:viewItems",
+    "portal:user:viewOrgUsers", "portal:user:viewOrgGroups", "portal:user:viewOrgItems",
+    "premium:user:basemaps"})
+
+
+class NotReadOnly(SystemExit):
+    """The service account can do more than view: refuse to go on."""
+
+
+def check_read_only(gis):
+    """Refuses (NotReadOnly) unless the signed-in account's privileges are all in READ_ONLY_PRIVILEGES. Fails closed:
+    any privilege not on the list stops the run, even one that only looks harmless (21 October 2026, Dan: deletes
+    are only ever run deliberately, never automatically)."""
+    me = gis.users.me
+    extra = sorted(set(me.privileges or []) - READ_ONLY_PRIVILEGES)
+    if extra:
+        raise NotReadOnly(f"REFUSED: {me.username} (role {me.role}) can do more than view in ArcGIS Online: {', '.join(extra)}. "
+                          "Nothing was read or changed. Put the account back on its read-only role.")
+    return me
+
+
 def agol_gis():
-    """Signs in to ArcGIS Online, read access for the pipeline. With AGOL_USERNAME and AGOL_PASSWORD set (a service
-    account with the administrator role, which the organization reports need) it uses them, at AGOL_URL (default
-    https://www.arcgis.com); otherwise the ArcGIS Pro sign-in on this machine (GIS("home"))."""
+    """Signs in to ArcGIS Online, read access for the pipeline. With AGOL_USERNAME and AGOL_PASSWORD set (the
+    read-only service account) it uses them, at AGOL_URL (default https://www.arcgis.com), and refuses to go on unless
+    the account can only view (check_read_only); otherwise the ArcGIS Pro sign-in on this machine (GIS("home")), for
+    the maintainer's own use on the workstation."""
     from arcgis.gis import GIS
     user, password = os.environ.get("AGOL_USERNAME"), os.environ.get("AGOL_PASSWORD")
-    gis = GIS(os.environ.get("AGOL_URL") or "https://www.arcgis.com", user, password) if user and password else GIS("home")
+    if user and password:
+        gis = GIS(os.environ.get("AGOL_URL") or "https://www.arcgis.com", user, password)
+        me = check_read_only(gis)
+        print(f"connected to ArcGIS Online as {me.username} (read-only: {len(me.privileges)} view privileges, checked)")
+        return gis
+    gis = GIS("home")
     print(f"connected to ArcGIS Online as {gis.users.me.username}")
     return gis
 

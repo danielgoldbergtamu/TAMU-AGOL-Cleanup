@@ -2,6 +2,8 @@
 
 Steps, each its own process (DuckDB has one writer at a time; each step opens the database, writes, and closes):
 
+  0. read-only check   stops the run unless the service account can only view (tools/check_read_only.py); each
+                       later step that signs in checks again
   1. group inventory   which items are shared to which groups (tools/group_inventory.py)
   2. Entra lookup      the newest lookup file left in the inbox (AGOL_ENTRA_INBOX, default data/entra-inbox), its
                        history recorded once; if there is none, the lookup already in the database is used again.
@@ -90,6 +92,7 @@ def main():
     with Run(None, "daily") as run:
         os.environ["AGOL_RUN_ID"] = run.run_id   # every step records itself under this run and writes into its folder
         started = datetime.datetime.now()
+        step("read-only-check", ["tools/check_read_only.py"], run)   # first, before anything is read
         groups = run.path("groups")
         if args.skip_groups:
             found = sorted(glob.glob(os.path.join(db.reports_dir(), "runs", "**", "groups", "groups.csv"), recursive=True), key=os.path.getmtime)
