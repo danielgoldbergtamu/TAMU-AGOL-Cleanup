@@ -177,10 +177,21 @@ def people(con, named):
     return stored_view(con, named, "people")
 
 
+def runs(con):
+    """The most recent runs, read when asked (the list built with the dashboards is taken while that run is still
+    going, so it would show it as running): the same fields and text form as the builder's."""
+    text = lambda v: "" if v is None else str(v)
+    return [{"run_id": r, "kind": k, "status": s, "started_at": text(a), "finished_at": text(f)} for r, k, s, a, f in con.execute(
+        "SELECT run_id, kind, status, started_at, finished_at FROM RUNS ORDER BY started_at DESC LIMIT 25").fetchall()]
+
+
 def base(con, named):
     """What every page needs as it opens: the small sections (totals, units, top items and owners, runs, ...) and
     the index of college, department and degree views (without their tables)."""
-    return stored_view(con, named, "base")
+    found = stored_view(con, named, "base")
+    if found and has(con, "RUNS"):
+        found["base"]["runs"] = runs(con)
+    return found
 
 
 def review(con, named):

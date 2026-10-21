@@ -89,42 +89,51 @@ def main():
     parser.add_argument("--mqs-csv", help="use this directory (MQS) lookup instead of a new one (tests)")
     args = parser.parse_args()
 
-    with Run(None, "daily") as run:
-        os.environ["AGOL_RUN_ID"] = run.run_id   # every step records itself under this run and writes into its folder
-        started = datetime.datetime.now()
-        step("read-only-check", ["tools/check_read_only.py"], run)   # first, before anything is read
-        groups = run.path("groups")
-        if args.skip_groups:
-            found = sorted(glob.glob(os.path.join(db.reports_dir(), "runs", "**", "groups", "groups.csv"), recursive=True), key=os.path.getmtime)
-            if not found:
-                raise RuntimeError("--skip-groups: no earlier group inventory found")
-            groups = os.path.dirname(found[-1])
-        else:
-            step("groups", ["tools/group_inventory.py", "--out", groups], run)
+    try:
+        with Run(None, "daily") as run:
+            os.environ["AGOL_RUN_ID"] = run.run_id   # every step records itself under this run and writes into its folder
+            started = datetime.datetime.now()
+            step("read-only-check", ["tools/check_read_only.py"], run)   # first, before anything is read
+            groups = run.path("groups")
+            if args.skip_groups:
+                found = sorted(glob.glob(os.path.join(db.reports_dir(), "runs", "**", "groups", "groups.csv"), recursive=True), key=os.path.getmtime)
+                if not found:
+                    raise RuntimeError("--skip-groups: no earlier group inventory found")
+                groups = os.path.dirname(found[-1])
+            else:
+                step("groups", ["tools/group_inventory.py", "--out", groups], run)
 
-        catalog = ["TAMU_AGOL_Catalog.py", "--entraid-csv", entra_lookup(run)]
-        if args.members_csv and args.items_csv:
-            catalog += ["--members-csv", args.members_csv, "--items-csv", args.items_csv]
-        if args.mqs_csv:
-            catalog += ["--mqs-csv", args.mqs_csv]
-        step("catalog", catalog, run)
+            catalog = ["TAMU_AGOL_Catalog.py", "--entraid-csv", entra_lookup(run)]
+            if args.members_csv and args.items_csv:
+                catalog += ["--members-csv", args.members_csv, "--items-csv", args.items_csv]
+            if args.mqs_csv:
+                catalog += ["--mqs-csv", args.mqs_csv]
+            step("catalog", catalog, run)
 
-        step("deletestatus", ["TAMU_AGOL_DeleteStatus.py", "--dry-run"], run)
-        changes = os.path.join(run.dir, "deletestatus-dryrun", "DeleteStatus_changes.csv")
-        removal = run.path("removal")
-        step("removal", ["tools/removal_summary.py", "--changes", changes, "--out", removal], run)
-        step("snapshot", ["dashboard/build_dashboard_data.py", "--groups", groups, "--out", run.path("dashboard-data"), "--changes", changes,
-                          "--removal-summary", os.path.join(removal, "removal_summary.csv")], run)
-        step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", os.path.join(removal, "removal_summary.csv"),
-                            "--groups", groups], run)
-        step("publish-db", ["tools/publish_serving_db.py"], run)
+            step("deletestatus", ["TAMU_AGOL_DeleteStatus.py", "--dry-run"], run)
+            changes = os.path.join(run.dir, "deletestatus-dryrun", "DeleteStatus_changes.csv")
+            removal = run.path("removal")
+            step("removal", ["tools/removal_summary.py", "--changes", changes, "--out", removal], run)
+            step("snapshot", ["dashboard/build_dashboard_data.py", "--groups", groups, "--out", run.path("dashboard-data"), "--changes", changes,
+                              "--removal-summary", os.path.join(removal, "removal_summary.csv")], run)
+            step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", os.path.join(removal, "removal_summary.csv"),
+                                "--groups", groups], run)
+            step("publish-db", ["tools/publish_serving_db.py"], run)
 
-        status = {"run_id": run.run_id, "started": started.isoformat(timespec="seconds"),
-                  "finished": datetime.datetime.now().isoformat(timespec="seconds"), "groups": groups}
-        os.makedirs(db.output_dir(), exist_ok=True)
-        json.dump(status, open(os.path.join(db.output_dir(), "last_run.json"), "w"), indent=1)
-        run.note(**status)
-        print(f"daily run {run.run_id} finished in {(datetime.datetime.now() - started).seconds // 60} min")
+            status = {"run_id": run.run_id, "started": started.isoformat(timespec="seconds"),
+                      "finished": datetime.datetime.now().isoformat(timespec="seconds"), "groups": groups}
+            os.makedirs(db.output_dir(), exist_ok=True)
+            json.dump(status, open(os.path.join(db.output_dir(), "last_run.json"), "w"), indent=1)
+            run.note(**status)
+            print(f"daily run {run.run_id} finished in {(datetime.datetime.now() - started).seconds // 60} min")
+
+    finally:
+        # Once more after the run is marked succeeded or failed, so the site's copy of RUNS shows how it ended (the
+        # publish-db step inside the run copies it while the run still reads "running"). After a failure the site
+        # keeps the last good data and shows the failed run.
+        result = subprocess.run([sys.executable, "-u", "tools/publish_serving_db.py"], cwd=SCRIPT_DIR)
+        if result.returncode != 0:
+            print("the final publish failed; the site keeps the copy published during the run")
 
 
 if __name__ == "__main__":
