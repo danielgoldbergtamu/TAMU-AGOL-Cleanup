@@ -348,6 +348,29 @@ def record_supervisors(rows, run_date):
     print(f"Supervisor history: {int(frame['Sightings'].sum()) if len(frame) else 0} supervisor sightings recorded in HIST_Supervisors.")
 
 
+def people_file(lookup_csv_path):
+    return os.path.splitext(lookup_csv_path)[0] + ".people.csv"
+
+
+def record_history_from_files(lookup_csv_path, run_date=None):
+    """Records supervisors, names and NetIDs from a lookup file and its .people.csv. Used by this script after a
+    lookup, and by the daily job for a lookup made elsewhere. Re-recording the same files adds no rows."""
+    run_date = run_date or date.fromtimestamp(os.path.getmtime(lookup_csv_path))
+    with open(lookup_csv_path, encoding="utf-8-sig", newline="") as fh:
+        rows = [{k: (v or "") for k, v in r.items()} for r in csv.DictReader(fh)]
+    names, netids = [], []
+    if os.path.exists(people_file(lookup_csv_path)):
+        with open(people_file(lookup_csv_path), encoding="utf-8", newline="") as fh:
+            for r in csv.DictReader(fh):
+                if r["kind"] == "name":
+                    names.append((r["key"], r["first"], r["last"], r["display"]))
+                elif r["kind"] == "netid":
+                    netids.append((r["key"], r["first"]))
+    record_supervisors(rows, run_date)
+    record_names(names, run_date, "TAMU_AGOL_EntraID.py")
+    record_netids(netids, run_date)
+
+
 # Main
 ###########################################################################################
 
@@ -470,10 +493,16 @@ def main():
     print(f"Done in {(time.time() - started) / 60:.1f} min: {len(rows)} members, {matched} found in Entra, "
           f"{with_mgr} with a supervisor, {len(errors)} throttled. Wrote {args.output_csv_path}")
 
+    # The names and NetIDs found, beside the lookup, so the history can be recorded later from the two files
+    # (for a lookup made on a workstation and handed to the server's daily job; see record_history_from_files)
+    people_path = people_file(args.output_csv_path)
+    with open(people_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh, quoting=csv.QUOTE_ALL)
+        writer.writerow(["kind", "key", "first", "last", "display"])
+        writer.writerows([["name", *n] for n in names] + [["netid", u, n, "", ""] for u, n in netids])
+
     if not args.no_history:
-        record_supervisors(rows, run_date)
-        record_names(names, run_date, "TAMU_AGOL_EntraID.py")
-        record_netids(netids, run_date)
+        record_history_from_files(args.output_csv_path, run_date)
 
 
 if __name__ == "__main__":

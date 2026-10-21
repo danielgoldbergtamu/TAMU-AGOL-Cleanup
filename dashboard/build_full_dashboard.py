@@ -50,6 +50,11 @@ def bucket_days(days, edges):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Build both dashboard editions from the newest snapshot.")
+    parser.add_argument("--removal-summary", help="removal_summary.csv to use (default: the newest one of the report's date)")
+    parser.add_argument("--groups", help="group inventory folder to use (default: the newest one)")
+    args = parser.parse_args()
     load_dotenv(os.path.join(REPO, ".env"), override=True)
     with db.connect() as c:
         def read(sql, *p):
@@ -187,7 +192,7 @@ def main():
 
     # Removal groups: the most recently written removal summary of this date (tools/removal_summary.py).
     day = pd.Timestamp(as_of).strftime("%Y%m%d")
-    summaries = sorted(glob.glob(os.path.join(db.reports_dir(), "runs", f"{day}*", "**", "removal_summary.csv"), recursive=True), key=os.path.getmtime)
+    summaries = [args.removal_summary] if args.removal_summary else         sorted(glob.glob(os.path.join(db.reports_dir(), "runs", f"{day}*", "**", "removal_summary.csv"), recursive=True), key=os.path.getmtime)
     removal = list(csv.DictReader(open(summaries[-1], encoding="utf-8"))) if summaries else []
 
     def r(x, n=3):   # GB to 3 decimals (1 MB), so the page can show 0.01 GB (10 MB)
@@ -262,6 +267,8 @@ def main():
     inventories = sorted(glob.glob(os.path.join(db.reports_dir(), "runs", "*", "groups", "groups.csv"))
                          + glob.glob(os.path.join(db.reports_dir(), "runs", "*-group-inventory", "groups.csv")), key=os.path.getmtime)
     group_owner, item_groups = {}, {}
+    if args.groups:
+        inventories = [os.path.join(args.groups, "groups.csv")]
     if inventories:
         folder = os.path.dirname(inventories[-1])
         group_owner = {r_["group_id"]: r_["owner"].strip().lower() for r_ in csv.DictReader(open(os.path.join(folder, "groups.csv"), encoding="utf-8"))}
