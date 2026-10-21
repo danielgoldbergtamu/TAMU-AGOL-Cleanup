@@ -194,6 +194,35 @@ def main():
                           "feature_gb": r(x.feature_gb, 3), "file_gb": r(x.file_gb, 3)}
                          for i, x in enumerate(b.head(200).itertuples(index=False))]}
 
+    def change_history(named):
+        """Every member's state in every snapshot (the latest run of each date): classification, unit and projected
+        delete status, stored only on the dates it changes, so the page can compare any two snapshots. Names and
+        supervisors only in the full edition."""
+        h = snap_history.copy()
+        h["key"] = h["username"].str.strip().str.lower()
+        h["d"] = h["as_of"].astype(str).str[:10]
+        dates = sorted(h["d"].unique())
+        di = {d: i for i, d in enumerate(dates)}
+        classes = sorted(h["classification"].fillna("-").unique())
+        units = sorted(h["unit"].fillna("").unique())
+        ci, ui = {c: i for i, c in enumerate(classes)}, {u: i for i, u in enumerate(units)}
+        gb_now, items_now = dict(zip(snap["key"], snap["feature_gb"])), dict(zip(snap["key"], snap["items"]))
+        rows = []
+        for k, g in h.groupby("key", sort=True):
+            states = {di[x.d]: (ci[x.classification if isinstance(x.classification, str) else "-"], ui[x.unit if isinstance(x.unit, str) else ""],
+                                -1 if pd.isna(x.projected_status) else int(x.projected_status)) for x in g.itertuples(index=False)}
+            entries, prev = [], "absent"
+            for d in range(len(dates)):
+                s = states.get(d)
+                cur = s if s is not None else "absent"
+                if cur != prev:
+                    entries.append([d, *s] if s is not None else [d])   # [date index] alone: no longer a member
+                    prev = cur
+            sup = latest_sup.get(norm(k)) if named else None
+            rows.append([g["username"].iloc[0] if named else "", r(gb_now.get(k, 0) or 0, 3), int(items_now.get(k, 0) or 0),
+                         sup if isinstance(sup, str) else "", entries])
+        return {"dates": dates, "classes": classes, "units": units, "rows": rows}
+
     def supv(row, named):  # the owner's latest supervisor on record; the published edition says only whether there is one
         s = row["supervisor"] if isinstance(row["supervisor"], str) else ""
         return s if named else ("on record" if s else "")
@@ -524,7 +553,7 @@ def main():
                 "limits": {"feature_gb": FEATURE_LIMIT_GB, "accounts": ACCOUNT_LIMIT}, "total": total, "current_accounts": current_accounts, "recycle_bin": recycle_bin(named), "trend": trend,
                 "classes": classes, "removal": removal, "units": units, "unit_trend": unit_trend, "item_types": item_types,
                 "viewed": viewed, "logins": logins, "roles": roles, "login_types": logintypes, "top_items": ti, "top_users": tu,
-                "change_counts": change_counts, "change_list": change_list, "quality": quality,
+                "history": change_history(named), "quality": quality,
                 "runs": runs.astype(str).to_dict("records"), "scopes": scopes(named), "review": review(named), "degree_names": degree_names, "degree_notes": unconfirmed,
                 "placement": {f"{u}\u0001{s}": list(place(u, s)) for u, s in set(zip(snap_unit, snap_sub)) | set(zip(items["item_unit"], items["item_sub"])) if s}, "people": people(named)}
 
@@ -536,7 +565,7 @@ def main():
         data = edition(named)
         if named:
             # only the names of people who appear on the page
-            shown = set(re.findall(r"[a-z0-9._%+-]+@[a-z0-9.-]+|[a-z0-9._-]{3,}", json.dumps(data, default=str).lower()))
+            shown = set(re.findall(r"[a-z0-9._%+-]+@[a-z0-9.-]+|[a-z0-9._-]{3,}", json.dumps({k_: v_ for k_, v_ in data.items() if k_ != "history"}, default=str).lower()))   # the history lists everyone; not "shown"
             shown_accounts = {k for k in snap["key"] if k in shown or norm(k) in shown}
             data["accounts"] = {k: v for k, v in arcgis_email.items() if k in shown}
             in_multi = set(multi["person"])
@@ -550,23 +579,6 @@ def main():
                                     r(a.feature_gb, 3), r(a.file_gb, 3), date_str(a.last_login), status_label.get(a.projected_status, "not assessed"),
                                     a.supervisor if isinstance(a.supervisor, str) else "", a.rgroup, a.login_type]
                                    for a in snap.itertuples(index=False)]
-            # The accounts behind each row of the Changes table, with their history across snapshots
-            if len(changes):
-                data["change_rows"] = [[c.username, c.prev_classification if isinstance(c.prev_classification, str) else "-",
-                                        c.classification if isinstance(c.classification, str) else "-",
-                                        c.prev_projected_label if isinstance(c.prev_projected_label, str) else "none",
-                                        c.projected_label if isinstance(c.projected_label, str) else "none",
-                                        c.prev_unit if isinstance(c.prev_unit, str) else "", c.unit if isinstance(c.unit, str) else "",
-                                        r(c.feature_gb or 0, 3), int(c.items or 0),
-                                        (lambda s_: s_ if isinstance(s_, str) else "")(latest_sup.get(norm(c.username)))]
-                                       for c in changes.itertuples(index=False)]
-                changed = set(changes["username"].str.strip().str.lower())
-                h_ = snap_history[snap_history["username"].str.strip().str.lower().isin(changed)].sort_values("as_of")
-                hist = {}
-                for row_ in h_.itertuples(index=False):
-                    hist.setdefault(row_.username.strip().lower(), []).append(
-                        [str(row_.as_of)[:10], row_.classification, status_label.get(row_.projected_status, "none"), row_.unit])
-                data["status_history"] = hist
             for k in snap["key"]:
                 if norm(k) in person_names:
                     data["names"].setdefault(norm(k), person_names[norm(k)])

@@ -36,6 +36,9 @@ section.panel.stack[hidden] { display: none; }
 .card > .lede:last-child, .card > .note:last-child { margin-bottom: 0; }
 .grid2.cards { gap: 14px; align-items: stretch; }
 .card.statuses { margin-bottom: 0; padding: 16px 18px; }
+/* The row under the mouse, in every table (and the college tree), so it is clear which row a number belongs to. */
+tbody tr:hover > td, tbody tr:hover > th { background: rgba(127, 140, 155, .16); }
+tbody tr:hover > td:first-child { box-shadow: inset 3px 0 0 var(--current); }
 h2 { font-size: 1.15rem; margin: 0 0 4px; }
 .lede { color: var(--ink-2); margin: 0 0 14px; max-width: 85ch; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 16px; }
@@ -93,8 +96,8 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 </header>
 <nav aria-label="Sections">
   <a href="#overview">Overview</a><a href="#removals">Proposed removals</a><a href="#review">Review</a><a href="#units">Colleges and departments</a>
-  <a href="#items">Largest layers</a><a href="#users">Largest owners</a><a href="#changes">Changes</a>
-  <a href="#content">Content</a><a href="#accounts">Accounts</a><a href="#people">Multi-Account Holders</a><a href="#quality">Data quality</a><a href="#runs">Runs</a>
+  <a href="#items">Largest layers</a><a href="#users">Largest owners</a>
+  <a href="#content">Content</a><a href="#accounts">Accounts</a><a href="#people">Multi-Account Holders</a><a href="#quality">Data quality</a><a href="#runs">Runs</a><a href="#changes">Changes</a>
 </nav>
 
 <section class="panel stack" id="unitview" hidden aria-live="polite">
@@ -184,7 +187,9 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 </section>
 
 <section class="panel stack" id="changes">
-  <div class="card"><h2>Changes since the previous run</h2><p class="lede" id="changes-lede"></p></div>
+  <div class="card"><h2>Changes</h2><p class="lede" id="changes-lede"></p>
+    <div class="controls"><label for="ch-from">From <select id="ch-from"></select></label><label for="ch-to">to <select id="ch-to"></select></label>
+      <span class="muted small">Each snapshot is the last run of its date. Accounts that joined or left in between are counted too.</span></div></div>
   <div class="card"><h3>What changed</h3><div class="tw" id="changecounts"></div></div>
   <div class="card" id="changelist-card"><div class="tw" id="changelist"></div></div>
 </section>
@@ -211,7 +216,7 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
   <div class="card"><p class="crumbs"><a href="#changes">Changes</a> &rsaquo; accounts</p>
   <h2 id="cv-title"></h2><p class="lede" id="cv-lede"></p>
   <div class="tiles" id="cv-tiles"></div></div>
-  <div class="card"><h3>The accounts</h3><p class="note">History: each account's Entra classification and projected delete status in every snapshot, oldest first. Select a column header to sort.</p>
+  <div class="card"><h3>The accounts</h3><p class="note">History: each account's Entra classification, projected delete status and unit on every snapshot date where one of them changed, oldest first. Select a column header to sort.</p>
   <div class="tw" id="cv-table"></div></div>
 </section>
 <section class="panel stack" id="groupview" hidden aria-live="polite">
@@ -474,7 +479,7 @@ function review() {
 const REDRAW = { overview: () => overview(), removals: () => removals(), units: () => units(), content: () => content() };
 function route() {
   const h = decodeURIComponent(location.hash.slice(1)) || "overview";
-  if (h.startsWith("chg:") && D.change_rows) {
+  if (h.startsWith("chg:") && D.edition === "full") {
     document.querySelectorAll("section.panel").forEach(s => { s.hidden = s.id !== "changeview"; });
     document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#changes"));
     renderChange(h.slice(4)); scrollTo(0, 0); return;
@@ -618,19 +623,69 @@ function tops() {
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_users);
 }
 
+/* Changes between any two snapshots, from D.history: each member's state (classification, unit, projected
+   status) stored only on the dates it changed. */
+const H = D.history || { dates: [], classes: [], units: [], rows: [] };
+const PROJ = { "-1": "none", "0": "kept", "1": "flagged", "2": "listed for removal" };
+let CH = { a: Math.max(0, H.dates.length - 2), b: Math.max(0, H.dates.length - 1) };
+function stateAt(entries, d) {
+  let s = null;
+  for (const e of entries) { if (e[0] > d) break; s = e.length > 1 ? e : null; }
+  return s && { cls: H.classes[s[1]], unit: H.units[s[2]], proj: PROJ[s[3]] };
+}
+function changedBetween(a, b) {
+  const out = [];
+  for (const r of H.rows) {
+    const s1 = stateAt(r[4], a), s2 = stateAt(r[4], b);
+    if (!s1 && !s2) continue;
+    if (s1 && s2 && s1.cls === s2.cls && s1.unit === s2.unit && s1.proj === s2.proj) continue;
+    out.push({ user: r[0], feature_gb: r[1], items: r[2], supervisor: r[3], entries: r[4], s1, s2 });
+  }
+  return out;
+}
+function changeKinds(c) {   // the rows of the "What changed" table this account counts in
+  if (!c.s1) return [["membership", "not a member", "member"]];
+  if (!c.s2) return [["membership", "member", "not a member"]];
+  const k = [];
+  if (c.s1.cls !== c.s2.cls) k.push(["classification", c.s1.cls, c.s2.cls]);
+  if (c.s1.proj !== c.s2.proj) k.push(["projected delete status", c.s1.proj, c.s2.proj]);
+  if (c.s1.unit !== c.s2.unit) k.push(["unit", "changed", "changed"]);
+  return k;
+}
 function changes() {
-  const prev = D.trend.length > 1 ? D.trend[D.trend.length - 2].as_of : null;
-  $("#changes-lede").textContent = prev ? `Between the snapshot of ${prev} and this one (${D.as_of}).` : "This is the first snapshot; changes appear from the next run.";
-  const chgKey = r => encodeURIComponent([r.kind, r.from, r.to].join("|"));
-  $("#changelist-card").hidden = !D.change_list.length;
-  if (!D.change_counts.length) $("#changecounts").innerHTML = prev
-    ? '<p class="note">No account changed its Entra classification, unit or projected delete status between these two snapshots.</p>' : "";
-  if (D.change_counts.length) table("#changecounts", [{ h: "What changed", f: r => D.change_rows ? `<a class="u" href="#chg:${chgKey(r)}">${esc(r.kind)}</a>` : esc(r.kind) }, { h: "From", f: r => pill(r.from) }, { h: "To", f: r => pill(r.to) },
-    { h: "Accounts", n: 1, f: r => n(r.accounts) }, { h: "Their feature storage", n: 1, f: r => gb(r.feature_gb) }], D.change_counts.sort((a, b) => b.accounts - a.accounts));
-  if (D.change_list.length) { $("#changelist").insertAdjacentHTML("beforebegin", "<h3>Accounts that changed (largest 300 by storage)</h3>");
-    table("#changelist", [{ h: "Account", f: r => who(r.username), w: 1 }, { h: "Was", f: r => pill(r.prev_classification) }, { h: "Now", f: r => pill(r.classification) },
-      { h: "Unit was", k: "prev_unit", w: 1 }, { h: "Unit now", k: "unit", w: 1 }, { h: "Status was", k: "prev_projected_status" }, { h: "Status now", k: "projected_status" },
-      { h: "Feature GB", n: 1, f: r => (+r.feature_gb).toFixed(2) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.change_list); }
+  const sel = (id, v) => { $(id).innerHTML = H.dates.map((d, i) => `<option value="${i}"${i === v ? " selected" : ""}>${d}</option>`).join(""); };
+  sel("#ch-from", CH.a); sel("#ch-to", CH.b);
+  $("#ch-from").onchange = () => { CH.a = +$("#ch-from").value; changes(); };
+  $("#ch-to").onchange = () => { CH.b = +$("#ch-to").value; changes(); };
+  if (H.dates.length < 2) {
+    $("#changes-lede").textContent = "This is the first snapshot; changes appear from the next run.";
+    $("#changecounts").innerHTML = ""; $("#changelist-card").hidden = true; return;
+  }
+  const [a, b] = [CH.a, CH.b], from = H.dates[a], to = H.dates[b];
+  $("#changes-lede").textContent = a === b ? `The same snapshot (${from}) on both sides: choose two different dates.`
+    : `Between the snapshot of ${from} and the snapshot of ${to}${a > b ? " (going back in time)" : ""}.`;
+  const list = a === b ? [] : changedBetween(a, b), counts = new Map();
+  for (const c of list) for (const [kind, f, tt] of changeKinds(c)) {
+    const key = [kind, f, tt].join("|"), x = counts.get(key) || { kind, from: f, to: tt, accounts: 0, feature_gb: 0 };
+    x.accounts++; x.feature_gb += c.feature_gb; counts.set(key, x);
+  }
+  const named = D.edition === "full";
+  const label = r => r.kind === "unit" ? "unit (college or agency)" : r.kind;
+  const link = r => named ? `<a class="u" href="#chg:${encodeURIComponent([r.kind, r.from, r.to, a, b].join("|"))}">${esc(label(r))}</a>` : esc(label(r));
+  if (!counts.size) $("#changecounts").innerHTML = a === b ? "" :
+    '<p class="note">No account joined or left, or changed its Entra classification, unit or projected delete status, between these two snapshots.</p>';
+  else table("#changecounts", [{ h: "What changed", f: link }, { h: "From", f: r => r.kind === "unit" ? "" : pill(r.from) }, { h: "To", f: r => r.kind === "unit" ? "" : pill(r.to) },
+    { h: "Accounts", n: 1, f: r => n(r.accounts) }, { h: "Their feature storage (now)", n: 1, f: r => gb(r.feature_gb) }], [...counts.values()].sort((x, y) => y.accounts - x.accounts));
+  $("#changelist-card").hidden = !named || !list.length;
+  if (named && list.length) {
+    $("#changelist-card").innerHTML = '<h3>Accounts that changed (largest 300 by storage now)</h3><div class="tw" id="changelist"></div>';
+    const st = (s, k) => s ? (k === "unit" ? unitLink(s.unit) : pill(s[k])) : '<span class="muted">not a member</span>';
+    table("#changelist", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Was", f: r => st(r.s1, "cls") }, { h: "Now", f: r => st(r.s2, "cls") },
+      { h: "Unit was", f: r => st(r.s1, "unit"), w: 1 }, { h: "Unit now", f: r => st(r.s2, "unit"), w: 1 },
+      { h: "Status was", f: r => st(r.s1, "proj") }, { h: "Status now", f: r => st(r.s2, "proj") },
+      { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }],
+      list.slice().sort((x, y) => y.feature_gb - x.feature_gb).slice(0, 300));
+  }
 }
 
 function content() {
@@ -674,19 +729,18 @@ function renderAccount(key) {
 /* The accounts behind one row of the Proposed removals table. The summary's group names are matched to each
    account's removal group (the builder's labels are shorter). */
 function renderChange(key) {
-  const [kind, from, to] = key.split("|"), isClass = kind === "classification";
-  const rows = (D.change_rows || []).filter(c => isClass ? c[1] === from && c[2] === to : c[3] === from && c[4] === to)
-    .map(c => ({ user: c[0], was: isClass ? c[1] : c[3], now: isClass ? c[2] : c[4], prev_unit: c[5], unit: c[6], feature_gb: c[7], items: c[8], supervisor: c[9] }));
-  $("#cv-title").innerHTML = `${esc(kind)}: ${pill(from)} → ${pill(to)}`;
-  const prev = D.trend.length > 1 ? D.trend[D.trend.length - 2].as_of : "";
-  $("#cv-lede").textContent = `${n(rows.length)} accounts whose ${kind} changed between the snapshot of ${prev} and this one (${D.as_of}).`;
+  const [kind, from, to, a, b] = key.split("|");
+  const rows = changedBetween(+a, +b).filter(c => changeKinds(c).some(k => k[0] === kind && k[1] === from && k[2] === to))
+    .map(c => ({ ...c, prev_unit: c.s1 ? c.s1.unit : "", unit: c.s2 ? c.s2.unit : "" }));
+  $("#cv-title").innerHTML = kind === "unit" ? "unit (college or agency) changed" : `${esc(kind)}: ${pill(from)} → ${pill(to)}`;
+  $("#cv-lede").textContent = `${n(rows.length)} accounts, between the snapshot of ${H.dates[+a]} and the snapshot of ${H.dates[+b]}.`;
   const sum = k => rows.reduce((x, r) => x + (+r[k] || 0), 0);
   $("#cv-tiles").innerHTML = [["Accounts", n(rows.length), ""], ["Items", n(sum("items")), ""], ["Feature storage", gb(sum("feature_gb")), ""]]
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
-  const history = r => ((D.status_history || {})[String(r.user).toLowerCase()] || [])
-    .map(h => `<span class="muted small">${esc(h[0])}</span> ${pill(h[1])} ${pill(h[2])}`).join("<br>");
+  const history = r => r.entries.map(e => `<span class="muted small">${esc(H.dates[e[0]])}</span> ` + (e.length > 1
+    ? `${pill(H.classes[e[1]])} ${pill(PROJ[e[3]])} <span class="muted small">${esc(H.units[e[2]])}</span>` : '<span class="muted">not a member</span>')).join("<br>");
   rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
-  table("#cv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Unit was", f: r => r.prev_unit ? unitLink(r.prev_unit) : "", w: 1 }, { h: "Unit now", f: r => unitLink(r.unit), w: 1 },
+  table("#cv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Unit was", f: r => r.prev_unit ? unitLink(r.prev_unit) : "", w: 1 }, { h: "Unit now", f: r => r.unit ? unitLink(r.unit) : "", w: 1 },
     { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "History", f: history, w: 1 },
     { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], rows);
 }
