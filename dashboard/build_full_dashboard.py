@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
+load_dotenv(os.path.join(REPO, ".env"), override=False)   # before any path is read from the settings
 import agol_db as db  # noqa: E402
 FEATURE_LIMIT_GB, ACCOUNT_LIMIT = 500, 15000
 # Degree (major code) -> department, from the TAMU catalogs (20 October 2026, Dan's review pending). Rows with

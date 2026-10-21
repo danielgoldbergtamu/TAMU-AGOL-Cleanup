@@ -37,6 +37,7 @@ from dotenv import load_dotenv
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+load_dotenv(os.path.join(REPO, ".env"), override=False)   # before any path is read from the settings
 import agol_db as db  # noqa: E402
 from TAMU_AGOL_Runs import Run  # noqa: E402
 
