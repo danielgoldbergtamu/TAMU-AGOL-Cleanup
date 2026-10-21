@@ -29,7 +29,7 @@ SERVE_NAME = "agol-serve.duckdb"
 TABLES = ["SNAP_MemberStatus", "SNAP_UnitUsage", "SNAP_RemovalSummary", "RUNS",
           "HIST_Supervisors", "HIST_AccountNetIDs", "HIST_PersonNames", "_meta",
           # the account pages, written by dashboard/build_full_dashboard.py
-          "DASH_Account", "DASH_AccountItems", "DASH_Names", "DASH_ArcgisLogins", "DASH_PersonOf"]
+          "DASH_Account", "DASH_AccountItems", "DASH_Names", "DASH_ArcgisLogins", "DASH_PersonOf", "DASH_GroupList", "DASH_ViewData"]
 NEWEST = ["OrganizationMembers_", "OrganizationItems_"]
 
 

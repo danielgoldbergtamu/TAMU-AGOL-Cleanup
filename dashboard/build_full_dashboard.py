@@ -39,6 +39,10 @@ COLLEGE_LEVEL = os.path.join(db.config_dir(), "college_level_departments.csv")
 STAFF, COLLEGE_LEVEL_DEPT = "Faculty & staff", "College-level"
 sys.path.insert(0, HERE)
 from build_dashboard_data import COLLEGE_UNIT  # noqa: E402  (the directory college -> unit table the snapshot uses)
+# the views the page takes whole, kept per edition for the website (DASH_ViewData), and the group list's columns
+SITE_VIEWS = ("history", "people")
+GROUP_LIST_COLUMNS = ["user", "classification", "unit", "sub_unit", "items", "feature_gb", "file_gb", "last_login", "projected",
+                      "supervisor", "rgroup", "login"]
 STANDARD_ROLES = {"Publisher with Notebooks", "User", "Viewer", "Data Editor", "Publisher"}
 norm = lambda v: re.sub(r'(@[^@\s]+?)_[a-z0-9]+$', r'\1', (v or '').strip().lower())
 
@@ -557,9 +561,11 @@ def main():
                 "runs": runs.astype(str).to_dict("records"), "scopes": scopes(named), "review": review(named), "degree_names": degree_names, "degree_notes": unconfirmed,
                 "placement": {f"{u}\u0001{s}": list(place(u, s)) for u, s in set(zip(snap_unit, snap_sub)) | set(zip(items["item_unit"], items["item_sub"])) if s}, "people": people(named)}
 
-    def write_site_tables(acct, acct_items, names, logins, person_of_multi, counts):
-        """Every account's page, for the website's API (/api/v1/account/<name>): written to the database each run
-        (replacing the last run's), and copied to the site's read-only copy by tools/publish_serving_db.py."""
+    def write_site_tables(acct, acct_items, names, logins, person_of_multi, counts, group_list, views):
+        """What the website's API reads, written to the database each run (replacing the last run's) and copied to
+        the site's read-only copy by tools/publish_serving_db.py: every account's page (/api/v1/account/<name>),
+        every account with its removal group (/api/v1/group/<group>, full edition), and the views the page takes
+        whole, as each edition shows them (DASH_ViewData: /api/v1/history, /api/v1/people)."""
         accounts = pd.DataFrame([{"key": k, **v} for k, v in acct.items()])
         item_rows = pd.DataFrame([[k, n_, *x] for k, xs in acct_items.items() for n_, x in enumerate(xs)],
                                  columns=["key", "n", "item_id", "title", "item_type", "feature_gb", "file_gb", "share", "last_viewed", "created"])
@@ -567,7 +573,10 @@ def main():
         tables = {"DASH_Account": accounts, "DASH_AccountItems": item_rows,
                   "DASH_Names": pd.DataFrame(sorted(names.items()), columns=["key", "name"]),
                   "DASH_ArcgisLogins": pd.DataFrame(sorted(logins.items()), columns=["key", "email"]),
-                  "DASH_PersonOf": pd.DataFrame([(k, p, int(counts[p])) for k, p in sorted(person_of_multi.items())], columns=["key", "person", "accounts"])}
+                  "DASH_PersonOf": pd.DataFrame([(k, p, int(counts[p])) for k, p in sorted(person_of_multi.items())], columns=["key", "person", "accounts"]),
+                  "DASH_GroupList": pd.DataFrame(group_list, columns=GROUP_LIST_COLUMNS),
+                  "DASH_ViewData": pd.DataFrame([(ed, v, json.dumps(d, separators=(",", ":"), default=str)) for ed, vs in views.items() for v, d in vs.items()],
+                                                columns=["edition", "view", "data"])}
         with db.connect() as c:
             c.execute("BEGIN")
             for name, df in tables.items():
@@ -576,6 +585,7 @@ def main():
         print("site tables: " + ", ".join(f"{k} {len(v)}" for k, v in tables.items()))
 
     template = open(os.path.join(HERE, "full_template.html"), encoding="utf-8").read()
+    site_views = {}
     out = db.output_dir()
     os.makedirs(out, exist_ok=True)
     for named, path in ((True, os.path.join(out, "AGOL_Cleanup_Dashboard_FULL.html")),
@@ -592,13 +602,14 @@ def main():
             data["person_of"] = {norm(k): p for k, p in person_of.items() if k in shown_accounts and p in counts}
             data["person_n"] = {p: int(n) for p, n in counts.items()}
             data["acct"], data["acct_items"] = account_pages(shown_accounts | set(snap.loc[snap["person"].isin(in_multi), "key"]))
-            write_site_tables(*account_pages(set(snap["key"])), person_names, arcgis_email,
-                              {norm(k): p for k, p in person_of.items() if p in counts}, counts)
+            site = {"pages": account_pages(set(snap["key"])), "person_of": {norm(k): p for k, p in person_of.items() if p in counts},
+                    "counts": counts}
             # Every account with its removal group, for the lists behind the Proposed removals table (full edition only)
             data["group_lists"] = [[a.username, a.classification, a.unit, a.sub_unit if isinstance(a.sub_unit, str) else "", int(a.items),
                                     r(a.feature_gb, 3), r(a.file_gb, 3), date_str(a.last_login), status_label.get(a.projected_status, "not assessed"),
                                     a.supervisor if isinstance(a.supervisor, str) else "", a.rgroup, a.login_type]
                                    for a in snap.itertuples(index=False)]
+            site["group_list"] = data["group_lists"]
             for k in snap["key"]:
                 if norm(k) in person_names:
                     data["names"].setdefault(norm(k), person_names[norm(k)])
@@ -622,6 +633,8 @@ def main():
             open(target + ".tmp", "w", encoding="utf-8").write(content)
             os.replace(target + ".tmp", target)
         print(f"wrote {path} ({len(page) / 1024:.0f} KB, {data['edition']} edition)")
+        site_views[data["edition"]] = {k: data[k] for k in SITE_VIEWS}
+    write_site_tables(*site["pages"], person_names, arcgis_email, site["person_of"], site["counts"], site["group_list"], site_views)
 
 
 if __name__ == "__main__":

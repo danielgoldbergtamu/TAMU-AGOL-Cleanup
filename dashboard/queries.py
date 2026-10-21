@@ -7,6 +7,7 @@ view in the built pages for reading them offline; a view moved here is checked a
 
 Only duckdb is needed, so the website does not load pandas for these.
 """
+import json
 import re
 
 FEATURE_LIMIT_GB, ACCOUNT_LIMIT = 500, 15000
@@ -135,14 +136,66 @@ def account(con, named, key):
     a = found[0]
     items = [[x[c] for c in ITEM_COLUMNS] for x in rows(con, "SELECT * FROM DASH_AccountItems WHERE key = ? ORDER BY n", [key])]
     others = rows(con, "SELECT * FROM DASH_Account WHERE person = ? AND key <> ? ORDER BY feature_gb DESC, key", [a["person"], key]) if a["person"] else []
-    ids = sorted({norm(x) for x in [a["user"], a["supervisor"], *(o["user"] for o in others)] if x})
-    pick = lambda table, col: {k: v for k, v in con.execute(f"SELECT key, {col} FROM {table} WHERE key IN (SELECT UNNEST(?))", [ids]).fetchall()}
-    person_of = {k: (p, n) for k, p, n in con.execute("SELECT key, person, accounts FROM DASH_PersonOf WHERE key IN (SELECT UNNEST(?))", [ids]).fetchall()}
     return {"key": key, "account": {k: v for k, v in a.items() if k != "key"}, "items": items,
             "others": [[o["key"], {k: v for k, v in o.items() if k != "key"}] for o in others],
-            "names": pick("DASH_Names", "name"), "accounts": pick("DASH_ArcgisLogins", "email"),
+            **lookups(con, [a["user"], a["supervisor"], *(o["user"] for o in others)])}
+
+
+def lookups(con, ids):
+    """For the accounts and people a view shows (full edition): their names, the owners of ArcGIS logins, and which
+    person each account belongs to, with how many accounts that person has. The page names people from these."""
+    # The tables are small (some 16,000 names), and passing thousands of keys into a query is far slower than
+    # reading a table whole (16 s against 0.02 s for the history's 14,700), so they are read whole and picked here.
+    ids = {norm(x) for x in ids if x}
+    pick = lambda table, col: {k: v for k, v in con.execute(f"SELECT key, {col} FROM {table}").fetchall() if k in ids}
+    person_of = {k: (p, n) for k, p, n in con.execute("SELECT key, person, accounts FROM DASH_PersonOf").fetchall() if k in ids}
+    return {"names": pick("DASH_Names", "name"), "accounts": pick("DASH_ArcgisLogins", "email"),
             "person_of": {k: p for k, (p, _) in person_of.items()}, "person_n": {p: n for p, n in person_of.values()}}
 
 
-VIEWS = {"overview": overview}
-KEYED_VIEWS = {"account": account}   # /api/v1/<view>/<key>
+def lookups_in(con, text):
+    """lookups() for every account or email that appears in a view's data (as the builder finds who a page shows)."""
+    return lookups(con, re.findall(r"[a-z0-9._%+-]+@[a-z0-9._-]+|[a-z0-9._-]{3,}", text.lower()))
+
+
+def stored_view(con, named, view):
+    """A view the page takes whole, as the builder made it for this edition (DASH_ViewData)."""
+    edition = "full" if named else "published"
+    found = con.execute("SELECT data FROM DASH_ViewData WHERE edition = ? AND view = ?", [edition, view]).fetchone() if has(con, "DASH_ViewData") else None
+    if not found:
+        return None
+    return {"edition": edition, view: json.loads(found[0]), **(lookups_in(con, found[0]) if named else {})}
+
+
+def history(con, named):
+    """Each member's state on every snapshot date (stored only when it changed), for the Changes page."""
+    return stored_view(con, named, "history")
+
+
+def people(con, named):
+    """People with more than one account (the Multi-Account Holders page)."""
+    return stored_view(con, named, "people")
+
+
+# which accounts each row of the removal table lists (the same rules as the page's groupMatcher)
+GROUP_RULES = [("1.", lambda g, items: g.startswith("1.")), ("2.", lambda g, items: g.startswith("2.")),
+               ("3.|empty", lambda g, items: g.startswith("3.") and items == 0), ("3.", lambda g, items: g.startswith("3.") and items > 0),
+               ("kept", lambda g, items: g.startswith("Kept")), ("review: admin", lambda g, items: g.startswith("Review: admin")),
+               ("review: empty", lambda g, items: g.startswith("Review: empty")), ("not yet", lambda g, items: g.startswith("Not yet"))]
+
+
+def group(con, named, key):
+    """The accounts of one removal group (full edition only), largest feature storage first."""
+    if not named or not has(con, "DASH_GroupList"):
+        return None
+    label = key
+    low = (label or "").lower()
+    rule = next((f for prefix, f in GROUP_RULES if low.startswith(prefix.split("|")[0]) and ("|" not in prefix or prefix.split("|")[1] in low)), None)
+    if rule is None:
+        return None
+    found = [x for x in rows(con, "SELECT * FROM DASH_GroupList ORDER BY feature_gb DESC, items DESC, user") if rule(x["rgroup"] or "", x["items"])]
+    return {"edition": "full", "group": label, "rows": found, **lookups(con, [x["user"] for x in found] + [x["supervisor"] for x in found])}
+
+
+VIEWS = {"overview": overview, "history": history, "people": people}
+KEYED_VIEWS = {"account": account, "group": group}   # /api/v1/<view>/<key>

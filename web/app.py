@@ -207,6 +207,8 @@ def view_data(request: Request, view: str, edition: str = "full"):
         data = queries.VIEWS[view](cur, named=edition == "full")
     finally:
         cur.close()
+    if data is None:   # e.g. a view the database has no data for yet
+        raise HTTPException(status_code=404)
     return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
 

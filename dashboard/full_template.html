@@ -484,7 +484,7 @@ function route() {
     document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#changes"));
     renderChange(h.slice(4)); scrollTo(0, 0); return;
   }
-  if (h.startsWith("grp:") && D.group_lists) {
+  if (h.startsWith("grp:") && (D.group_lists || (SERVED && D.edition === "full"))) {
     document.querySelectorAll("section.panel").forEach(s => { s.hidden = s.id !== "groupview"; });
     document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#removals"));
     renderGroup(h.slice(4)); scrollTo(0, 0); return;
@@ -532,7 +532,11 @@ async function apiData(path) {   // the site's answer, or null (opened as a file
   }
   return viewCache[path];
 }
-async function viewData(name) { return (await apiData(name)) || { ...D, source: "page" }; }
+function adopt(X) {   // the names, ArcGIS-login owners and people that came with an answer, for who()
+  if (X) for (const k of ["names", "accounts", "person_of", "person_n"]) if (X[k]) D[k] = Object.assign(D[k] || {}, X[k]);
+  return X;
+}
+async function viewData(name) { return adopt(await apiData(name)) || { ...D, source: "page" }; }
 // Every account has a page on the site (full edition); a page opened as a file has only the accounts built into it.
 const ACCOUNT_KEYS = new Set((D.group_lists || []).map(r => String(r[0]).trim().toLowerCase()));
 const hasAccountPage = k => (D.acct || {})[k] || (SERVED && ACCOUNT_KEYS.has(k));
@@ -570,7 +574,7 @@ async function overview() {
 
 function removals() {
   const t = D.total; const g = D.removal.slice().sort((a, b) => a.group.localeCompare(b.group));
-  table("#removal", [{ h: "Group", f: r => D.group_lists ? `<a class="u" href="#grp:${encodeURIComponent(r.group)}">${esc(r.group)}</a>` : esc(r.group), w: 1 },
+  table("#removal", [{ h: "Group", f: r => D.group_lists || (SERVED && D.edition === "full") ? `<a class="u" href="#grp:${encodeURIComponent(r.group)}">${esc(r.group)}</a>` : esc(r.group), w: 1 },
     { h: "Users", n: 1, f: r => n(r.users) }, { h: "Items", n: 1, f: r => n(r.items) },
     { h: "Feature", n: 1, f: r => gb(+r.feature_gb) }, { h: "File", n: 1, f: r => gb(+r.file_gb) }], g);
   const sum = p => D.removal.filter(r => p.test(r.group)).reduce((a, r) => a + +r.feature_gb, 0);
@@ -647,9 +651,16 @@ function tops() {
 
 /* Changes between any two snapshots, from D.history: each member's state (classification, unit, projected
    status) stored only on the dates it changed. */
-const H = D.history || { dates: [], classes: [], units: [], rows: [] };
+let H = { dates: [], classes: [], units: [], rows: [] }, CH = { a: 0, b: 0 };
 const PROJ = { "-1": "none", "0": "kept", "1": "flagged", "2": "listed for removal" };
-let CH = { a: Math.max(0, H.dates.length - 2), b: Math.max(0, H.dates.length - 1) };
+let historyReady = null;
+function loadHistory() {
+  return historyReady ||= viewData("history").then(X => {
+    H = X.history || H;
+    CH = { a: Math.max(0, H.dates.length - 2), b: Math.max(0, H.dates.length - 1) };
+    $("#changes").dataset.source = X.source;
+  });
+}
 function stateAt(entries, d) {
   let s = null;
   for (const e of entries) { if (e[0] > d) break; s = e.length > 1 ? e : null; }
@@ -674,7 +685,8 @@ function changeKinds(c) {   // the rows of the "What changed" table this account
   if (c.s1.unit !== c.s2.unit) k.push(["unit", "changed", "changed"]);
   return k;
 }
-function changes() {
+async function changes() {
+  await loadHistory();
   const sel = (id, v) => { $(id).innerHTML = H.dates.map((d, i) => `<option value="${i}"${i === v ? " selected" : ""}>${d}</option>`).join(""); };
   sel("#ch-from", CH.a); sel("#ch-to", CH.b);
   $("#ch-from").onchange = () => { CH.a = +$("#ch-from").value; changes(); };
@@ -728,8 +740,7 @@ function accounts() {
 
 async function renderAccount(key) {
   // from the site's database; the page's own data when opened as a file
-  const A = await apiData(`account/${encodeURIComponent(key)}`);
-  if (A) for (const k of ["names", "accounts", "person_of", "person_n"]) D[k] = Object.assign(D[k] || {}, A[k]);
+  const A = adopt(await apiData(`account/${encodeURIComponent(key)}`));
   const a = A ? A.account : (D.acct || {})[key];
   $("#acctview").dataset.source = A ? "database" : "page";
   if (!a) {
@@ -759,7 +770,8 @@ async function renderAccount(key) {
 
 /* The accounts behind one row of the Proposed removals table. The summary's group names are matched to each
    account's removal group (the builder's labels are shorter). */
-function renderChange(key) {
+async function renderChange(key) {
+  await loadHistory();
   const [kind, from, to, a, b] = key.split("|");
   const rows = changedBetween(+a, +b).filter(c => changeKinds(c).some(k => k[0] === kind && k[1] === from && k[2] === to))
     .map(c => ({ ...c, prev_unit: c.s1 ? c.s1.unit : "", unit: c.s2 ? c.s2.unit : "" }));
@@ -788,8 +800,10 @@ function groupMatcher(label) {
   if (L.startsWith("not yet")) return a => a[10].startsWith("Not yet");
   return () => false;
 }
-function renderGroup(label) {
-  const rows = (D.group_lists || []).filter(groupMatcher(label)).map(a => ({ user: a[0], classification: a[1], unit: a[2], sub_unit: a[3], items: a[4],
+async function renderGroup(label) {
+  const G = adopt(await apiData(`group/${encodeURIComponent(label)}`));
+  $("#groupview").dataset.source = G ? "database" : "page";
+  const rows = G ? G.rows : (D.group_lists || []).filter(groupMatcher(label)).map(a => ({ user: a[0], classification: a[1], unit: a[2], sub_unit: a[3], items: a[4],
     feature_gb: a[5], file_gb: a[6], last_login: a[7], projected: a[8], supervisor: a[9], login: a[11] }));
   const s = D.removal.find(r => r.group === label);
   $("#gv-title").textContent = label;
@@ -805,8 +819,9 @@ function renderGroup(label) {
     { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], rows);
 }
 
-function peopleView() {
-  const P = D.people;
+async function peopleView() {
+  const X = await viewData("people"), P = X.people;
+  $("#people").dataset.source = X.source;
   $("#pp-tiles").innerHTML = [["People with several accounts", n(P.people), `${n(P.accounts)} accounts`], ["Their feature storage", gb(P.feature_gb), ""],
     ["Current, with extra ArcGIS logins", n(P.current_with_arcgis), `${n(P.consolidate_accounts)} accounts, ${gb(P.consolidate_gb)}`],
     ["ArcGIS logins tied to a NetID", n(P.linked_arcgis), `of ${n(P.arcgis_total)}`]]
