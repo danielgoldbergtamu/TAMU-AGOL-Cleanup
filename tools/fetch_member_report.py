@@ -1,7 +1,7 @@
 """Downloads the newest AGOL member report (scheduled 'OrganizationMembers_' report item) to a CSV.
 
-Read-only. Signs in as agol_db.agol_gis() does: the service account in AGOL_USERNAME / AGOL_PASSWORD, else the
-ArcGIS Pro sign-in on this machine (an administrator).
+Read-only. Signs in as agol_db.agol_gis() does: only as the read-only service account (AGOL_USERNAME /
+AGOL_PASSWORD, from .env on a workstation), checked to have view privileges only.
 
     python tools/fetch_member_report.py --out <folder>/members.csv
 """

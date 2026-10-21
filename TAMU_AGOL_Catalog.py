@@ -5,9 +5,8 @@
 # DuckDB since 20 October 2026 (agol_db.py). The database is opened only once every lookup has finished: the Entra
 # lookup runs as a separate process and writes its own history tables, and DuckDB allows one writer at a time.
 #
-# Signing in to ArcGIS Online: with AGOL_USERNAME and AGOL_PASSWORD set (a service account with the
-# administrator role, which the organization reports need), the script signs in with them; otherwise it uses the
-# ArcGIS Pro sign-in on this machine (GIS("home")). It only reads ArcGIS Online.
+# Signing in to ArcGIS Online: only as the read-only service account (AGOL_USERNAME, AGOL_PASSWORD), checked to
+# have view privileges only (agol_db.agol_gis). It only reads ArcGIS Online.
 
 import argparse
 import datetime

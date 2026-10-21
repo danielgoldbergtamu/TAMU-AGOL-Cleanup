@@ -17,8 +17,13 @@ import re
 
 import duckdb
 import pandas as pd
+from dotenv import load_dotenv
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# The workstation's settings (.env beside this file, git-ignored), for every script that imports this module, so
+# none can forget them and sign in some other way (21 October 2026: two tools did, and fell back to the
+# maintainer's own administrator sign-in). Settings already in the environment win; the container has no .env.
+load_dotenv(os.path.join(SCRIPT_DIR, ".env"), override=False)
 
 
 def db_path():
@@ -61,20 +66,26 @@ def check_read_only(gis):
     return me
 
 
-def agol_gis():
-    """Signs in to ArcGIS Online, read access for the pipeline. With AGOL_USERNAME and AGOL_PASSWORD set (the
-    read-only service account) it uses them, at AGOL_URL (default https://www.arcgis.com), and refuses to go on unless
-    the account can only view (check_read_only); otherwise the ArcGIS Pro sign-in on this machine (GIS("home")), for
-    the maintainer's own use on the workstation."""
+def agol_gis(personal=False):
+    """Signs in to ArcGIS Online as the read-only service account (AGOL_USERNAME, AGOL_PASSWORD, at AGOL_URL,
+    default https://www.arcgis.com), and refuses to go on unless the account can only view (check_read_only).
+    Without those settings it refuses: it never falls back to another sign-in on its own.
+
+    personal=True signs in with the ArcGIS Pro sign-in on this machine (GIS("home")), the maintainer's
+    administrator account, instead. Only a tool the maintainer runs deliberately may ask for it; nothing in the
+    pipeline does (CLAUDE.md, "Deleting")."""
     from arcgis.gis import GIS
-    user, password = os.environ.get("AGOL_USERNAME"), os.environ.get("AGOL_PASSWORD")
-    if user and password:
-        gis = GIS(os.environ.get("AGOL_URL") or "https://www.arcgis.com", user, password)
-        me = check_read_only(gis)
-        print(f"connected to ArcGIS Online as {me.username} (read-only: {len(me.privileges)} view privileges, checked)")
+    if personal:
+        gis = GIS("home")
+        print(f"connected to ArcGIS Online as {gis.users.me.username} (the ArcGIS Pro sign-in on this machine, asked for)")
         return gis
-    gis = GIS("home")
-    print(f"connected to ArcGIS Online as {gis.users.me.username}")
+    user, password = os.environ.get("AGOL_USERNAME"), os.environ.get("AGOL_PASSWORD")
+    if not (user and password):
+        raise SystemExit("REFUSED: AGOL_USERNAME and AGOL_PASSWORD are not set (.env beside agol_db.py, or the "
+                         "environment). Sign-in is only as the read-only service account; nothing was read.")
+    gis = GIS(os.environ.get("AGOL_URL") or "https://www.arcgis.com", user, password)
+    me = check_read_only(gis)
+    print(f"connected to ArcGIS Online as {me.username} (read-only: {len(me.privileges)} view privileges, checked)")
     return gis
 
 
