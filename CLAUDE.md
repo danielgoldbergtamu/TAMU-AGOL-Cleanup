@@ -85,11 +85,36 @@ Graph is called from Python for identity, and DuckDB holds the catalog and queri
 - The PowerShell lookup (`TAMU_AGOL_EntraID.ps1`) was retired on 3 October 2026, after a
   person-by-person comparison with `TAMU_AGOL_EntraID.py` on the same 12,531 members agreed everywhere
   except its two bugs. It is in the git history. The toolchain has no PowerShell now.
-- SQL Server (`AGOLCleanup`) holds the catalog until DuckDB replaces it.
+- DuckDB holds the catalog (the `duckdb` branch, which replaces SQL Server `AGOLCleanup` once it merges to
+  `main`). The daily job runs on the cluster, not on a workstation (see "The hosted site" below).
 - GEO Jobe stays the item-delete tool until the API deleter is proven.
 
 Run Python with ArcGIS Pro's interpreter (`arcgispro-py3`), which has `arcgis`. The Python on
 `PATH` does not. Pro must be signed in to the organization as an administrator for `GIS("home")`.
+
+## The hosted site
+
+The dashboard runs on the GeoServices Kubernetes cluster at `https://agol-cleanup.geoservices.tamu.edu/`, TAMU
+networks only, behind Auth0. Everything about running it (manifests, firewall rules, the daily job, a new
+image, checking a run) is in the private kubernetes-config repository, folder `10. AGOL Cleanup/`.
+
+- **Dan runs every command that changes the cluster or the firewall.** Give him the commands, one at a time
+  for Windows PowerShell 5.1 (no `&&`), and check each result with him. Reading the cluster is fine.
+- **Show Dan any GitHub text (PR, issue, comment) before posting it.**
+- The page holds no data: it asks the site's API (`/api/v1/...`, `web/app.py`, `dashboard/queries.py`), which
+  reads the read-only copy the daily job publishes. Check a view moved to the API against what it showed before.
+- The daily job stops unless its AGOL account can only view (`tools/check_read_only.py`). Never widen
+  `agol_db.READ_ONLY_PRIVILEGES` to let it run with more.
+- **The Entra lookup** still needs Dan's Microsoft sign-in, so it runs on his workstation **every Monday, before
+  any removal review, and whenever Dan asks**, and is handed to the cluster. Remind him on Mondays, give him the
+  steps from the kubernetes-config README ("Every week"), and check the next daily run used it.
+
+## Where knowledge is kept
+
+**In the repositories, never only in an assistant's memory** (Dan, 21 October 2026): another machine or
+session must be able to find it. Working rules go here, decisions in the private repository's `DECISIONS.md`,
+operating the deployment in kubernetes-config. When something is decided or learned, write it there in the same
+session; local memory may point to it, never hold the only copy.
 
 ## Git
 
