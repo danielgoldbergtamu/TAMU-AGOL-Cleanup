@@ -20,7 +20,10 @@ import datetime
 import os
 import time
 
-from arcgis.gis import GIS
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agol_db import agol_gis  # noqa: E402
 
 GROUP_FIELDS = ["group_id", "title", "owner", "access", "created", "modified", "tags", "item_count"]
 
@@ -49,7 +52,7 @@ def main():
         with open(groups_path, encoding="utf-8") as fh:
             done = {r["group_id"] for r in csv.DictReader(fh)}
 
-    gis = GIS("home")
+    gis = agol_gis()
     groups = gis.groups.search(f"orgid:{gis.properties.id}", max_groups=20000)
     say(f"{len(groups)} groups in the organization; {len(done)} already read")
 

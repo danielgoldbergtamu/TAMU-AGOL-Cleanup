@@ -1,6 +1,7 @@
 """Downloads the newest AGOL member report (scheduled 'OrganizationMembers_' report item) to a CSV.
 
-Read-only. ArcGIS Pro must be signed in to the organization as an administrator (GIS('home')).
+Read-only. Signs in as agol_db.agol_gis() does: the service account in AGOL_USERNAME / AGOL_PASSWORD, else the
+ArcGIS Pro sign-in on this machine (an administrator).
 
     python tools/fetch_member_report.py --out <folder>/members.csv
 """
@@ -9,15 +10,19 @@ import datetime
 import os
 import tempfile
 
+import sys
+
 import pandas as pd
-from arcgis.gis import GIS
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agol_db import agol_gis  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True, help="CSV path to write")
     args = parser.parse_args()
-    gis = GIS("home")
+    gis = agol_gis()
     found = gis.content.search('title:"OrganizationMembers_"', max_items=1, sort_field="created", sort_order="desc")
     if not found:
         raise SystemExit("No OrganizationMembers_ report found in AGOL.")

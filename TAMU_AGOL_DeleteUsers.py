@@ -1,118 +1,31 @@
-# File Name: TAMU_AGOL_DeleteEmptyUsers.py
-# Decription: This script accesses the AGOL catalog database, finds all users that have been tagged for deletion (DeleteStatus = 2)
-#             or have 0 items published, and compiles a list of users to delete. The list is saved as a CSV in the reports directory.
+# File Name: TAMU_AGOL_DeleteUsers.py
+# Decription: Lists the accounts at DeleteStatus 2, into this run's folder (UsersToDelete.csv). It removes nothing:
+#             removing accounts and content is a separate, manual step, only after the maintainer has reviewed a
+#             specific set and approved it in writing, and only after a verified backup (CLAUDE.md, "Deleting").
 # Author: Dalton Peterson
-# Date: 2026-04-02
+# Date: 2026-04-02 (DuckDB since 2026-10-20)
 
-from urllib.parse import quote_plus
-
-import pandas as pd
-from arcgis.gis import GIS
-from sqlalchemy import create_engine
-from sqlalchemy import text
-from dotenv import load_dotenv
-import datetime
 import os
 
+import pandas as pd
+from dotenv import load_dotenv
+
+from agol_db import connect, q
 from TAMU_AGOL_Runs import Run
-from os import getenv
 
-# Load environment variables FIRST, before accessing any getenv() calls
-load_dotenv()
-
-# GLOBAL VARIABLES & INITIALIZATION
-############################################################################################
-
-CURRENT_DATE = datetime.datetime.now().date()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
-
-DELETE_STATUS_TABLE_NAME = getenv("DELETE_STATUS_TABLE_NAME")
-
-# Connect to SQL Server using SQLALchemy
-sql_connection_string = (getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
-if not sql_connection_string:
-    raise RuntimeError(
-        f"Missing SQL_CONNECTION_STRING. Add it to environment variables or {ENV_PATH}."
-    )
-
-# Accept either a SQLAlchemy URL or a raw ODBC connection string (Driver=...;Server=...;...)
-if "://" in sql_connection_string:
-    engine = create_engine(sql_connection_string)
-else:
-    odbc_connect = quote_plus(sql_connection_string)
-    engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
-
-# Connect to AGOL using user credentials
-gis = GIS("home")
-print(f'connected to ArcGIS online as {gis.users.me.username}')
-
-
-# FUNCTIONS
-#############################################################################################
-
-
-def collect_table_names():
-    """This function collects the names of the most recent member and item report tables from the DB.
-    Returns:
-        member_table_name (str): The name of the most recent member report table.
-        item_table_name (str): The name of the most recent item report table.
-    """
-    with engine.connect() as connection:
-        cursor_item = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'OrganizationItems_%'"))
-        previous_item_reports = cursor_item.fetchall()
-        
-        cursor_member = connection.execute(text("SELECT name FROM sys.tables WHERE name LIKE 'OrganizationMembers_%'"))
-        previous_member_reports = cursor_member.fetchall()
-
-    # Return the most recent table names
-    member_table_name = previous_member_reports[-1][0] if previous_member_reports else None
-    item_table_name = previous_item_reports[-1][0] if previous_item_reports else None
-
-    return member_table_name, item_table_name
-
-
-def get_users_tagged_for_deletion():
-    """This function queries the AGOL catalog database to find all users that have been tagged for deletion (DeleteStatus = 2).
-    Returns:
-        users_to_delete (list): A list of usernames that have been tagged for deletion.
-    """
-    print('Querying database for users tagged for deletion...')
-
-    query = f"""
-    SELECT Username
-    FROM {DELETE_STATUS_TABLE_NAME}
-    WHERE DeleteStatus = 2
-    """
-    with engine.connect() as connection:
-        result = connection.execute(text(query))
-        users_to_delete = [row[0] for row in result.fetchall()]
-
-    print(f'Found {len(users_to_delete)} users tagged for deletion.')
-    
-    return users_to_delete
+load_dotenv(os.path.join(SCRIPT_DIR, ".env"), override=True)
+DELETE_STATUS_TABLE_NAME = os.getenv("DELETE_STATUS_TABLE_NAME") or "DeleteStatus"
 
 
 def main():
-    with Run(engine, 'deleteusers') as run:
-        member_table_name, item_table_name = collect_table_names()
-        users_tagged_for_deletion = get_users_tagged_for_deletion()
-
-        # Combine the two lists and remove duplicates
-        users_to_delete = set(users_tagged_for_deletion)
-
-        users_to_delete_df = pd.DataFrame(sorted(users_to_delete), columns=['Username'])
+    with connect() as con, Run(con, 'deleteusers') as run:
+        print('Querying database for users tagged for deletion...')
+        users = [r[0] for r in con.execute(f"SELECT Username FROM {q(DELETE_STATUS_TABLE_NAME)} WHERE DeleteStatus = 2 ORDER BY Username").fetchall()]
         users_to_delete_csv = run.path('UsersToDelete.csv')   # this run's folder: never overwrites an earlier list
-        users_to_delete_df.to_csv(users_to_delete_csv, index=False)
-        run.note(users_to_delete=len(users_to_delete))
-
-        print(f'Found {len(users_to_delete)} users to delete.')
-        print(f'Saved users-to-delete list to {users_to_delete_csv}')
-
-
-
-# MAIN EXECUTION
-##############################################################################################
+        pd.DataFrame(users, columns=['Username']).to_csv(users_to_delete_csv, index=False)
+        run.note(users_to_delete=len(users))
+        print(f'Found {len(users)} accounts at status 2. Saved the list to {users_to_delete_csv} (nothing is removed).')
 
 
 if __name__ == "__main__":

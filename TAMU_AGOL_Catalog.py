@@ -20,7 +20,7 @@ from os import getenv
 import pandas as pd
 from dotenv import load_dotenv
 
-from agol_db import connect, reports_dir, tables_like, write
+from agol_db import agol_gis, connect, reports_dir, tables_like, write
 from TAMU_AGOL_Runs import Run, merge_snapshot_into_history
 
 
@@ -35,14 +35,6 @@ ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
 # that used to live here deleted every history row identical to a newer one; removed 3 October 2026.
 
 load_dotenv(dotenv_path=ENV_PATH, override=True)
-
-
-def connect_agol():
-    from arcgis.gis import GIS
-    user, password = getenv("AGOL_USERNAME"), getenv("AGOL_PASSWORD")
-    gis = GIS(getenv("AGOL_URL") or "https://www.arcgis.com", user, password) if user and password else GIS("home")
-    print(f'connected to ArcGIS online as {gis.users.me.username}')
-    return gis
 
 
 # FUNCTIONS
@@ -253,7 +245,7 @@ def main(entraid_csv=None, mqs_csv=None, members_csv=None, items_csv=None):
             item_report_title, member_report_title = title(items_csv), title(members_csv)
         else:
             item_report_df, member_report_df, item_report_csv_path, member_report_csv_path, item_report_title, member_report_title = \
-                fetch_reports(connect_agol(), run.dir)
+                fetch_reports(agol_gis(), run.dir)
         run.note(item_report=item_report_title, member_report=member_report_title,
                  items=len(item_report_df), members=len(member_report_df))
         entraid_status_path = run.path('AGOL_EntraID_Status.csv')

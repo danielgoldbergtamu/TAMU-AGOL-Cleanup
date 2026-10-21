@@ -11,7 +11,7 @@
 
 import os
 
-from TAMU_AGOL_Catalog import main as catalog_main, engine
+from TAMU_AGOL_Catalog import main as catalog_main
 from TAMU_AGOL_Runs import Run
 from TAMU_AGOL_DeleteStatus import main as delete_status_main
 from TAMU_AGOL_DeleteUsers import main as delete_users_main
@@ -21,7 +21,7 @@ def main():
     # One pipeline run; each step below records its own run under it and writes into a sub-folder of
     # reports/runs/<pipeline run id>/ (TAMU_AGOL_Runs reads AGOL_RUN_ID).
     print("Starting ArcGIS Online cleanup process...")
-    with Run(engine, 'pipeline') as pipeline:
+    with Run(None, 'pipeline') as pipeline:   # holds no connection: each step opens the database itself
         os.environ['AGOL_RUN_ID'] = pipeline.run_id
         try:
             run_steps()

@@ -37,6 +37,17 @@ def output_dir():
     return os.environ.get("AGOL_OUTPUT_DIR") or os.path.join(SCRIPT_DIR, "data")
 
 
+def agol_gis():
+    """Signs in to ArcGIS Online, read access for the pipeline. With AGOL_USERNAME and AGOL_PASSWORD set (a service
+    account with the administrator role, which the organization reports need) it uses them, at AGOL_URL (default
+    https://www.arcgis.com); otherwise the ArcGIS Pro sign-in on this machine (GIS("home"))."""
+    from arcgis.gis import GIS
+    user, password = os.environ.get("AGOL_USERNAME"), os.environ.get("AGOL_PASSWORD")
+    gis = GIS(os.environ.get("AGOL_URL") or "https://www.arcgis.com", user, password) if user and password else GIS("home")
+    print(f"connected to ArcGIS Online as {gis.users.me.username}")
+    return gis
+
+
 def connect(read_only=False, path=None):
     path = path or db_path()
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
