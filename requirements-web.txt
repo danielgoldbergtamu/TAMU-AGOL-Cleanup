@@ -1,0 +1,7 @@
+# The web app (web/app.py).
+fastapi==0.115.12
+uvicorn==0.34.2
+authlib==1.5.2
+itsdangerous==2.2.0
+httpx==0.28.1
+python-dotenv==1.1.0

@@ -687,7 +687,7 @@ function quality() {
     { h: "Started", f: r => esc((r.started_at || "").slice(0, 16)) }, { h: "Finished", f: r => esc((r.finished_at || "").slice(0, 16).replace("NaT", "")) }], D.runs);
 }
 
-$("#edition").textContent = D.edition === "full" ? "Full: names people, local only" : "People and layer titles hidden";
+$("#edition").textContent = D.edition === "full" ? "Full: names people, signed-in access only" : "People and layer titles hidden";
 $("#edition").className = "badge " + D.edition;
 $("#asof").textContent = `Data as of ${D.as_of}; built ${D.generated}. Sources: ${D.sources}.`;
 try { const m = localStorage.getItem("agol-dash-metric"); if (m) $("#metric").value = m; } catch (e) {}

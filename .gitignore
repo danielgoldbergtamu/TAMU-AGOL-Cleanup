@@ -30,3 +30,6 @@ data/
 .vscode/
 __pycache__/
 *.pyc
+
+# Local Python environments
+.venv*/

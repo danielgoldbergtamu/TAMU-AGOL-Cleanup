@@ -1,0 +1,12 @@
+# Never in an image: organization data, secrets, local environments
+.git
+.env
+.env.*
+!.env.example
+data/
+reports/
+private/
+.venv*/
+**/__pycache__
+*.duckdb
+*.csv

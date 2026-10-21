@@ -566,9 +566,11 @@ def main():
             if leaked:
                 raise SystemExit(f"REFUSED: the published edition would name {len(leaked)} accounts (e.g. {leaked[:3]}). Not written.")
             print("published edition checked: no account names")
-        open(path, "w", encoding="utf-8").write(page)
         json_path = os.path.join(out, f"dashboard_{data['edition']}.json")   # the same data, for the web app
-        open(json_path, "w", encoding="utf-8").write(json.dumps(data, separators=(",", ":"), default=str))
+        for target, content in ((path, page), (json_path, json.dumps(data, separators=(",", ":"), default=str))):
+            # written beside, then moved into place: the site never serves a half-written file
+            open(target + ".tmp", "w", encoding="utf-8").write(content)
+            os.replace(target + ".tmp", target)
         print(f"wrote {path} ({len(page) / 1024:.0f} KB, {data['edition']} edition)")
 
 
