@@ -15,6 +15,8 @@ Settings (environment, or .env beside the repository):
   SESSION_SECRET        a long random string that signs the session cookie
   PUBLIC_URL            the site's address, for the sign-in callback and sign-out (e.g. https://agol.example.edu)
   AGOL_OUTPUT_DIR       where the daily job leaves the site's copy of the database (default data/)
+  AGOL_WEB_CACHE_DIR    where this app keeps its own copy of it (default: the system's temporary folder)
+  AGOL_WEB_DB_MEMORY    DuckDB's memory limit (default 512MB)
   AGOL_WEB_ENV=development and AUTH_DISABLED=1         sign-in off, for a local test only; refused otherwise
 
 Run:  uvicorn web.app:app --host 0.0.0.0 --port 8000
@@ -22,7 +24,9 @@ Run:  uvicorn web.app:app --host 0.0.0.0 --port 8000
 import json
 import os
 import secrets
+import shutil
 import sys
+import tempfile
 import threading
 import time
 
@@ -41,6 +45,8 @@ OUTPUT_DIR = os.environ.get("AGOL_OUTPUT_DIR") or os.path.join(REPO, "data")
 TEMPLATE = os.path.join(REPO, "dashboard", "full_template.html")
 EDITIONS = ("full", "published")
 SERVE_DB = "agol-serve.duckdb"
+CACHE_DIR = os.environ.get("AGOL_WEB_CACHE_DIR") or tempfile.gettempdir()   # this pod's own copy of the database
+DB_MEMORY = os.environ.get("AGOL_WEB_DB_MEMORY", "512MB")                    # DuckDB's limit, below the pod's
 sys.path.insert(0, os.path.join(REPO, "dashboard"))
 import queries  # noqa: E402
 
@@ -174,18 +180,30 @@ async def published(request: Request):
     return page(request, "published")
 
 
-_db = {"mtime": None, "con": None}
+_db = {"mtime": None, "con": None, "local": None}
 _db_lock = threading.Lock()
 
 
 def serving_db():
-    """A cursor on the newest read-only copy. The daily job replaces the file; the next request opens the new one
-    (the old connection is left to close when its last cursor is done)."""
+    """A cursor on the newest copy of the site's database. Each new copy the daily job publishes is copied to this
+    pod's own disk and opened there, read-only: the shared volume is NFS underneath, where DuckDB's file locks are
+    not to be trusted, and the job can then replace its file at any time. The previous connection closes when its
+    last cursor is done."""
     path = output_file(SERVE_DB)
     mtime = os.path.getmtime(path)
     with _db_lock:
         if _db["mtime"] != mtime:
-            _db["con"], _db["mtime"] = duckdb.connect(path, read_only=True), mtime
+            local = os.path.join(CACHE_DIR, f"agol-serve-{int(mtime * 1000)}.duckdb")
+            if not os.path.exists(local):
+                shutil.copyfile(path, local + ".tmp")
+                os.replace(local + ".tmp", local)
+            old = _db["local"]
+            _db.update(con=duckdb.connect(local, read_only=True, config={"memory_limit": DB_MEMORY}), mtime=mtime, local=local)
+            if old and old != local:
+                try:
+                    os.remove(old)   # Linux removes it once the last cursor on it is closed; Windows keeps it while open
+                except OSError:
+                    pass
         return _db["con"].cursor()
 
 
