@@ -529,13 +529,14 @@ function currentTiles(el, C, inUnit) {
 /* Views served from the database (21 October 2026): on the website, a view asks /api/v1/<view> for its data, which
    the site computes from its read-only copy of the database. Opened as a file, or if the site cannot answer, the view
    uses the data built into this page. Each view is asked for once per page load. */
-const SERVED = location.protocol.startsWith("http"), viewCache = {};
+const SERVED = location.protocol.startsWith("http"), viewCache = {}, viewStatus = {};
 async function apiData(path) {   // the site's answer, or null (opened as a file, not found, or the site cannot answer)
   if (!(path in viewCache)) {
     viewCache[path] = null;
     if (SERVED) {
       try {
         const res = await fetch(`/api/v1/${path}?edition=${D.edition}`, { credentials: "same-origin", headers: { Accept: "application/json" } });
+        viewStatus[path] = res.status;
         if (res.ok) viewCache[path] = { ...(await res.json()), source: "database" };
       } catch (e) { /* use the built-in data */ }
     }
@@ -868,7 +869,10 @@ async function start() {
     '<a href="https://agol-cleanup.geoservices.tamu.edu/">agol-cleanup.geoservices.tamu.edu</a> (Texas A&amp;M networks, sign-in required).');
   $("#asof").textContent = "Loading…";
   const B = adopt(await apiData("base"));
-  if (!B) return noData('The data could not be loaded. Your sign-in may have run out: <a href="/login">sign in again</a>.');
+  if (!B) return noData(viewStatus.base === 503
+    ? "No data yet: the daily job has not published its first run. Try again once it has finished (about an hour after it starts)."
+    : viewStatus.base === 401 ? 'Your sign-in has run out: <a href="/login">sign in again</a>.'
+    : 'The data could not be loaded. Try reloading the page, or <a href="/login">sign in again</a>.');
   Object.assign(D, B.base);
   indexScopes(D.scope_index);
   for (const k of D.account_keys || []) ACCOUNT_KEYS.add(k);
