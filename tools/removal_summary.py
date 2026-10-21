@@ -31,27 +31,15 @@ import argparse
 import csv
 import os
 import sys
-import urllib.parse
 from collections import defaultdict
 
 import pandas as pd
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from agol_db import connect, exists, newest, q  # noqa: E402
 STANDARD_ROLES = {"Publisher with Notebooks", "User", "Viewer", "Data Editor", "Publisher"}
-
-
-def engine_from_env():
-    load_dotenv(os.path.join(REPO, ".env"), override=True)
-    url = (os.getenv("SQL_CONNECTION_STRING") or "").strip().strip('"').strip("'")
-    if not url:
-        sys.exit("SQL_CONNECTION_STRING is not set in .env")
-    return create_engine(url if "://" in url else "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(url))
-
-
-def newest(connection, pattern):
-    return connection.execute(text(f"SELECT TOP 1 name FROM sys.tables WHERE name LIKE '{pattern}' ORDER BY name DESC")).scalar()
 
 
 def main():
@@ -61,18 +49,18 @@ def main():
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    engine = engine_from_env()
-    with engine.connect() as c:
-        members_table, items_table = newest(c, "OrganizationMembers[_]20%"), newest(c, "OrganizationItems[_]20%")
-        members = pd.read_sql(text(f"SELECT [Username], [Role], [Login Type], [Last Login Date], [Date Created], [# of Groups Owned] AS groups_owned FROM dbo.[{members_table}]"), c)
-        items = pd.read_sql(text(f"SELECT [Item ID], [Title], [Item Type], [Owner], [Share Level], [# of Groups shared with], "
-                                 f"[Date Last Viewed], [Feature Storage Size], [File Storage Size], [In Recycle Bin] FROM dbo.[{items_table}]"), c)
-        status = pd.read_sql(text("SELECT Username, DeleteStatus, Override FROM dbo.DeleteStatus"), c)
-        has_netids = c.execute(text("SELECT OBJECT_ID('dbo.HIST_AccountNetIDs')")).scalar() is not None
-        netids = pd.read_sql(text("SELECT Username, NetID, LastSeen FROM dbo.HIST_AccountNetIDs"), c) if has_netids else None
-        looked_up = pd.read_sql(text("SELECT Username FROM dbo.AGOL_EntraID_Status"), c)["Username"]
-        has_supervisors = c.execute(text("SELECT OBJECT_ID('dbo.HIST_Supervisors')")).scalar() is not None
-        supervisors = pd.read_sql(text("SELECT UserEmail, ManagerEmail, LastSeen FROM dbo.HIST_Supervisors"), c) if has_supervisors else None
+    load_dotenv(os.path.join(REPO, ".env"), override=True)
+    with connect() as c:
+        rd = lambda sql: c.execute(sql).df()
+        members_table, items_table = newest(c, "OrganizationMembers_"), newest(c, "OrganizationItems_")
+        members = rd(f'SELECT "Username", "Role", "Login Type", "Last Login Date", "Date Created", "# of Groups Owned" AS groups_owned FROM {q(members_table)}')
+        items = rd(f'SELECT "Item ID", "Title", "Item Type", "Owner", "Share Level", "# of Groups shared with", '
+                   f'"Date Last Viewed", "Feature Storage Size", "File Storage Size", "In Recycle Bin" FROM {q(items_table)}')
+        status = rd("SELECT Username, DeleteStatus, Override FROM DeleteStatus")
+        netids = rd("SELECT Username, NetID, LastSeen FROM HIST_AccountNetIDs") if exists(c, "HIST_AccountNetIDs") else None
+        looked_up = rd("SELECT Username FROM AGOL_EntraID_Status")["Username"]
+        has_supervisors = exists(c, "HIST_Supervisors")
+        supervisors = rd("SELECT UserEmail, ManagerEmail, LastSeen FROM HIST_Supervisors") if has_supervisors else None
 
     key = lambda s: s.astype(str).str.strip().str.lower()
     projected = dict(zip(key(status["Username"]), status["DeleteStatus"]))
