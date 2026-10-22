@@ -104,6 +104,8 @@ image, checking a run) is in the private kubernetes-config repository, folder `1
   and check each result with him. Reading the cluster is fine.
 - **Every command for Dan is Windows PowerShell 5.1**, in a `powershell` block, one command per block: no `&&`,
   quoted Windows paths, `$env:VAR`, `&` to run a program from a variable (Dan, 21 October 2026).
+  The first command of each set starts with the `cd` to its folder in the same block, joined with `;`
+  (Dan, 22 October 2026).
 - **Show Dan any GitHub text (PR, issue, comment) before posting it.**
 - The page holds no data: it asks the site's API (`/api/v1/...`, `web/app.py`, `dashboard/queries.py`), which
   reads the read-only copy the daily job publishes. Check a view moved to the API against what it showed before.
