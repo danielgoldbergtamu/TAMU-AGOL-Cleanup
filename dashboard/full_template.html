@@ -72,8 +72,14 @@ tr.dept .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em
 tr.unit .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em; display: inline-block; } tr.unit .toggle:focus-visible { outline: 2px solid var(--current); }
 .tw.tall { max-height: 75vh; overflow-y: auto; } .tw.tall th { position: sticky; top: 0; background: var(--panel); }
 th.sortable { cursor: pointer; } th.sortable:hover { color: var(--ink); }
-tr.filters th { padding-top: 0; font-weight: normal; text-transform: none; letter-spacing: 0; }
-tr.filters select { font: inherit; font-size: .8rem; max-width: 100%; padding: 2px 4px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.filterbar { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 8px; }
+.fgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.flabel { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); margin-right: 2px; }
+button.pill.fbtn { font-family: inherit; background: transparent; cursor: pointer; line-height: 1.5; }
+button.pill.fbtn .fcount { font-variant-numeric: tabular-nums; opacity: .75; margin-left: 3px; }
+.fgroup.on button.fbtn[aria-pressed="false"] { opacity: .45; }
+button.pill.fbtn[aria-pressed="true"] { box-shadow: 0 0 0 2px currentColor; }
+button.pill.fbtn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 p.note.filtered { margin: 0 0 6px; }
 .keybox { border: 1px solid var(--line); padding: 8px 12px; margin: 0 0 14px; font-size: .84rem; }
 .keybox summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
@@ -301,8 +307,8 @@ function sortValue(c, r) {
   if (c.n) { const v = parseFloat(String(raw).replace(/,/g, "")); return isNaN(v) ? null : v; }
   return String(raw).toLowerCase();
 }
-/* A column whose every value is a status label (a pill) gets a filter under its heading, in tables of more
-   than 10 rows: All, or one label, each with its count (Dan, 22 October 2026). Filters and sorting combine. */
+/* A column whose every value is a status label (a pill) gets a row of pill buttons above the table, in tables of
+   more than 10 rows: All, or one label, each with its count (Dan, 22 October 2026). Filters and sorting combine. */
 const PILL_RE = /^<span class="pill[^"]*"[^>]*>([^<]*)<\/span>$/;
 const unesc = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 function pillOf(c, r) { const m = c.f ? PILL_RE.exec(String(c.f(r)).trim()) : null; return m ? unesc(m[1]) : null; }
@@ -329,16 +335,19 @@ function table(el, cols, rows, state) {
       : st.dir * (typeof a[0] === "number" ? a[0] - b[0] : a[0].localeCompare(b[0], undefined, { numeric: true })));
     shown = keyed.map(x => x[1]);
   }
-  const filterRow = Object.keys(fcols).length ? `<tr class="filters">${cols.map((c, i) => `<th>${fcols[i] ? `<select data-col="${i}" aria-label="Show only one ${esc(c.h)}">`
-    + `<option value="">All (${n(rows.length)})</option>`
-    + fcols[i].map(([v, k]) => `<option value="${esc(v)}"${st.filters[i] === v ? " selected" : ""}>${esc(v)} (${n(k)})</option>`).join("") + `</select>` : ""}</th>`).join("")}</tr>` : "";
+  const btn = (i, v, label, k, cls) => `<button type="button" class="pill fbtn ${cls}" data-col="${i}" data-v="${esc(v)}" aria-pressed="${(st.filters[i] || "") === v}">${esc(label)}<span class="fcount">${n(k)}</span></button>`;
+  const filterBar = Object.keys(fcols).length ? `<div class="filterbar">${Object.entries(fcols).map(([i, vals]) =>
+    `<div class="fgroup${st.filters[i] ? " on" : ""}" role="group" aria-label="Show only one ${esc(cols[i].h)}"><span class="flabel">${esc(cols[i].h)}</span>`
+    + btn(i, "", "All", rows.length, "") + vals.map(([v, k]) => btn(i, v, v, k, slug(v))).join("") + `</div>`).join("")}</div>` : "";
   const note = active.length ? `<p class="note filtered">Showing ${n(shown.length)} of ${n(rows.length)}. <a href="#" class="clear-filters">Show all</a></p>` : "";
-  box.innerHTML = `${note}<table><thead><tr>${cols.map((c, i) => `<th class="sortable${c.n ? " n" : ""}" title="Sort by this column">${c.h}${i === st.col ? (st.dir === 1 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>${filterRow}</thead><tbody>${
+  box.innerHTML = `${filterBar}${note}<table><thead><tr>${cols.map((c, i) => `<th class="sortable${c.n ? " n" : ""}" title="Sort by this column">${c.h}${i === st.col ? (st.dir === 1 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>${
     shown.map(r => `<tr>${cols.map(c => `<td class="${c.n ? "n" : ""}${c.w ? " wtext" : ""}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   box.querySelectorAll("th.sortable").forEach((th, i) => th.onclick = () =>
     table(el, cols, rows, { ...st, col: i, dir: i === st.col ? -st.dir : (cols[i].n ? -1 : 1) }));
-  box.querySelectorAll("tr.filters select").forEach(s => s.onchange = () =>
-    table(el, cols, rows, { ...st, filters: { ...st.filters, [s.dataset.col]: s.value } }));
+  box.querySelectorAll("button.fbtn").forEach(b => b.onclick = () => {   // a second click on the chosen one shows all again
+    const v = (st.filters[b.dataset.col] || "") === b.dataset.v ? "" : b.dataset.v;
+    table(el, cols, rows, { ...st, filters: { ...st.filters, [b.dataset.col]: v } });
+  });
   const clear = box.querySelector(".clear-filters");
   if (clear) clear.onclick = e => { e.preventDefault(); table(el, cols, rows, { ...st, filters: {} }); };
 }
