@@ -116,7 +116,14 @@ image, checking a run) is in the private kubernetes-config repository, folder `1
   any removal review, and whenever Dan asks**, and is handed to the cluster. Remind him on Mondays, give him the
   steps from the kubernetes-config README ("Every week"), and check the next daily run used it.
 
-## Where knowledge is kept
+## Accounts tied to their owner by hand
+
+When Dan says an account belongs to someone ("<ArcGIS login> -> <their NetID account>"), add a row to the
+private repository's `config/account_owners.csv` (account, owner, note in his words, decided_on, decided_by), after
+checking both accounts exist in the latest run. Commit and push it, then give him the command that updates the
+cluster (kubernetes-config `10. AGOL Cleanup/04-create-lookup-tables.ps1`). A link counts fully: the account is its
+owner's, kept while the owner is current (`agol_db.apply_owner_links`, used by the delete status and the
+dashboard). Links do not expire; remove the row to undo one.## Where knowledge is kept
 
 **In the repositories, never only in an assistant's memory** (Dan, 21 October 2026): another machine or
 session must be able to find it. Working rules go here, decisions in the private repository's `DECISIONS.md`,
