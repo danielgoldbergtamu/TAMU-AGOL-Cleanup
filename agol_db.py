@@ -11,6 +11,9 @@
 #   AGOL_CONFIG_DIR   reviewed lookup tables: department-to-unit, degree-to-department, college-level names
 #                     (default private/config/; organization data, so never in the public repository)
 #   AGOL_OUTPUT_DIR   the web app's read-only copy of the database, and last_run.json (default data/)
+#
+# In AGOL_CONFIG_DIR, account_owners.csv lists accounts the maintainer has tied to their owner by hand
+# (account_owner_links): account, owner, note, decided_on, decided_by.
 
 import os
 import re
@@ -24,6 +27,37 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # none can forget them and sign in some other way (21 October 2026: two tools did, and fell back to the
 # maintainer's own administrator sign-in). Settings already in the environment win; the container has no .env.
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"), override=False)
+
+
+OWNER_LINKS_FILE = "account_owners.csv"
+
+
+def account_owner_links():
+    """The accounts the maintainer has tied to their owner by hand (22 October 2026, Dan: e.g. a project's ArcGIS
+    login belongs to the student who runs it), from AGOL_CONFIG_DIR/account_owners.csv: one row per account, with
+    the owner (an account username or a NetID), a note saying how it is known, the date and who decided. A link
+    counts fully: the account is its owner's, kept while the owner is current. Links do not expire; a row is
+    removed to undo one. No file: no links."""
+    import csv
+    path = os.path.join(config_dir(), OWNER_LINKS_FILE)
+    if not os.path.exists(path):
+        return []
+    links = []
+    for row in csv.DictReader(open(path, encoding="utf-8-sig")):
+        row = {k: (v or "").strip() for k, v in row.items() if k}
+        if row.get("account") and row.get("owner"):
+            links.append({**row, "account": row["account"].lower(), "owner": row["owner"].lower()})
+    return links
+
+
+def apply_owner_links(person_of, links=None):
+    """{account (lower): person} with the maintainer's links applied last, so a link wins over the Entra match.
+    The owner's person is the owner account's own person when known, else the owner itself without AGOL's
+    _suffix (a NetID: the owner account's username without its suffix)."""
+    for link in account_owner_links() if links is None else links:
+        owner = link["owner"]
+        person_of[link["account"]] = person_of.get(owner) or re.sub(r"(@[^@\s]+?)_[a-z0-9]+$", r"\1", owner)
+    return person_of
 
 
 def db_path():

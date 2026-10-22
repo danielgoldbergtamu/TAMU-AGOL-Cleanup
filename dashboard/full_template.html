@@ -247,6 +247,9 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 <section class="panel stack" id="quality">
   <div class="card"><h2>Data quality</h2><p class="lede">Gaps that affect the numbers above.</p></div>
   <div class="card"><div class="tw" id="qualitytable"></div></div>
+  <div class="card" id="links-block" hidden><h3>Accounts tied to their owner by hand</h3><p class="note">The maintainer's links
+    (account_owners.csv in the private repository). Each counts fully: the account is its owner's, kept while the owner is
+    current. A link stays until its row is removed.</p><div class="tw" id="linkstable"></div></div>
 </section>
 <section class="panel stack" id="runs">
   <div class="card"><h2>Runs</h2><p class="lede">The most recent pipeline runs recorded in the database.</p></div>
@@ -801,7 +804,7 @@ async function renderAccount(key) {
   $("#av-lede").innerHTML = `${esc(a.user)} &middot; ${a.login === "arcgis" ? "ArcGIS login" : "NetID login"} &middot; ${pill(a.classification)} &middot; projected ${pill(a.projected)}`;
   $("#av-tiles").innerHTML = [["Items", n(a.items), ""], ["Feature storage", gb(a.feature_gb), ""], ["File storage", gb(a.file_gb), ""], ["Groups owned", n(a.groups_owned), ""]]
     .map(([k, v, s]) => `<div class="tile"><div class="l">${k}</div><div class="v">${v}</div><div class="n">${s}</div></div>`).join("");
-  const rows = [["Account", esc(a.user)], ["Email on the account", esc(a.email)], ["Belongs to (NetID)", a.person ? esc(a.person) : '<span class="muted">not tied to a NetID</span>'],
+  const rows = [["Account", esc(a.user)], ["Email on the account", esc(a.email)], ["Belongs to (NetID)", (a.person ? esc(a.person) : '<span class="muted">not tied to a NetID</span>') + (a.linked ? `<br><span class="muted small">${esc(a.linked)}</span>` : "")],
     ["Login", a.login === "arcgis" ? "ArcGIS login" : "NetID (single sign-on)"], ["Role", esc(a.role)], ["Owner status (Entra)", pill(a.classification)],
     ["Unit", unitLink(a.unit)], ["Department or major", a.sub_unit ? subLink(a.unit, a.sub_unit) : '<span class="muted">not recorded</span>'],
     ["Supervisor", who(a.supervisor, "none on record")], ["Last sign-in", a.last_login || '<span class="muted">never</span>'],
@@ -889,6 +892,12 @@ async function peopleView() {
 }
 
 function quality() {
+  const L = D.owner_links;
+  $("#links-block").hidden = !L || (Array.isArray(L) ? !L.length : !L);
+  if (Array.isArray(L) && L.length) table("#linkstable", [{ h: "Account", f: r => who(r[0]) + (r[6] ? "" : '<br><span class="muted small">not in this run</span>'), w: 1 },
+    { h: "Owner", f: r => who(r[1]), w: 1 }, { h: "Belongs to (NetID)", f: r => esc(r[2]) }, { h: "How it is known", f: r => esc(r[3]), w: 1 },
+    { h: "Linked on", f: r => esc(r[4]) }, { h: "By", f: r => esc(r[5]) }], L);
+  else if (L) $("#linkstable").innerHTML = `<p class="note">${n(L)} accounts are tied to their owner by hand (names in the full edition only).</p>`;
   table("#qualitytable", [{ h: "Gap", k: 0, f: r => esc(r[0]) }, { h: "Accounts", n: 1, f: r => n(r[1]) }, { h: "Their feature storage", n: 1, f: r => gb(r[2]) }], D.quality);
   table("#runtable", [{ h: "Run", k: "run_id", w: 1 }, { h: "Kind", k: "kind" }, { h: "Status", f: r => pill(r.status === "succeeded" ? "kept" : r.status === "running" ? "flagged" : r.status === "failed" ? "listed for removal" : r.status).replace(/>[^<]*</, `>${esc(r.status)}<`) },
     { h: "Started", f: r => esc((r.started_at || "").slice(0, 16)) }, { h: "Finished", f: r => esc((r.finished_at || "").slice(0, 16).replace("NaT", "")) }], D.runs);

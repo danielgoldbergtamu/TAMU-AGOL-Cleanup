@@ -18,7 +18,7 @@ import os
 from os import getenv
 from dotenv import load_dotenv
 
-from agol_db import connect, exists, q, read, reports_dir, write
+from agol_db import apply_owner_links, connect, exists, q, read, reports_dir, write
 from TAMU_AGOL_UserQuotas import collect_table_names
 from TAMU_AGOL_Runs import Run
 
@@ -130,7 +130,8 @@ def Update_DeleteStatus_Table(entraid_table_name, delete_status_table_name, dry_
 def person_map(usernames):
     """{account username (lower): the person's NetID}. From HIST_AccountNetIDs (the userPrincipalName the
     Entra lookup matched, latest sighting), else, for a NetID (SSO) account, the NetID in its username.
-    ArcGIS-login accounts the lookup has never matched belong to no known person and are left out."""
+    ArcGIS-login accounts the lookup has never matched belong to no known person and are left out, unless the
+    maintainer has tied them to their owner by hand (account_owners.csv), which wins over the Entra match."""
     suffix = (getenv("AGOL_USERNAME_SUFFIX") or "").lower()
     out = {}
     for u in usernames:
@@ -140,7 +141,7 @@ def person_map(usernames):
     if exists(con, "HIST_AccountNetIDs"):
         for u, netid in con.execute("SELECT Username, NetID FROM HIST_AccountNetIDs ORDER BY LastSeen").fetchall():
             out[u.strip().lower()] = netid.strip().lower()
-    return out
+    return apply_owner_links(out)   # the maintainer's links last: they win (agol_db.account_owner_links)
 
 
 def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dry_run=False, run=None):
