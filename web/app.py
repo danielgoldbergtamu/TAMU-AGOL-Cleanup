@@ -207,6 +207,18 @@ def serving_db():
         return _db["con"].cursor()
 
 
+@app.get("/api/v1/search")
+def search_data(request: Request, q: str = ""):
+    """People matching q, for the search box (full edition only). Read-only."""
+    require_user(request)
+    cur = serving_db()
+    try:
+        data = queries.search(cur, True, q)
+    finally:
+        cur.close()
+    return JSONResponse(data or {"q": q, "count": 0, "people": []}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/v1/selection")
 def selection_data(request: Request, date: str = "created", year_from: int | None = None, year_to: int | None = None,
                    tiers: str = "", never: bool = False):

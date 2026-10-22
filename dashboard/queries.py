@@ -236,6 +236,28 @@ def group(con, named, key):
     return {"edition": "full", "group": label, "rows": found, **lookups(con, [x["user"] for x in found] + [x["supervisor"] for x in found])}
 
 
+def search(con, named, q, limit=25):
+    """People matching q (part of a name, NetID, account name or email), best matches first: an exact match, then
+    names or accounts starting with it, then containing it (Dan, 22 October 2026). Full edition only."""
+    q = (q or "").strip().lower()
+    if not named or len(q) < 2 or not has(con, "DASH_Account"):
+        return None
+    names = dict(con.execute("SELECT key, name FROM DASH_Names").fetchall())
+    found = []
+    for k, user, email, person, login, cls, proj, unit, sub, last, items, fgb in con.execute(
+            "SELECT key, user, email, person, login, classification, projected, unit, sub_unit, last_login, items, feature_gb FROM DASH_Account").fetchall():
+        name = names.get(norm(k)) or names.get(norm(email)) or ""
+        fields = [x.lower() for x in (name, user or "", email or "", person or "") if x]
+        if not any(q in f_ for f_ in fields):
+            continue
+        rank = 0 if any(f_ == q for f_ in fields) else 1 if any(f_.startswith(q) or any(w.startswith(q) for w in f_.split()) for f_ in fields) else 2
+        found.append((rank, -(fgb or 0), {"key": k, "user": user, "name": name, "email": email or "", "login": login, "classification": cls,
+                                          "projected": proj, "unit": unit, "sub_unit": sub or "", "last_login": last or "", "items": items,
+                                          "feature_gb": r(fgb)}))
+    found.sort(key=lambda x: (x[0], x[1]))
+    return {"edition": "full", "q": q, "count": len(found), "people": [x[2] for x in found[:limit]]}
+
+
 SELECTION_DATES = {"created": "created", "modified": "modified", "viewed": "last_viewed"}
 SELECTION_LIMIT = 50000
 

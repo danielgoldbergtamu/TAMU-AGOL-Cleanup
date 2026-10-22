@@ -82,6 +82,14 @@ button.pill.fbtn .fcount { font-variant-numeric: tabular-nums; opacity: .75; mar
 button.pill.fbtn[aria-pressed="true"] { box-shadow: 0 0 0 2px currentColor; }
 button.pill.fbtn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 p.note.filtered { margin: 0 0 6px; }
+.finder { position: relative; max-width: 34rem; margin-top: 10px; }
+.finder input { width: 100%; font: inherit; padding: 6px 10px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.finder input:focus { outline: 2px solid var(--current); outline-offset: 1px; }
+.find-results { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 70vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.find-results a { display: block; padding: 7px 10px; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.find-results a:first-child { border-top: 0; }
+.find-results a:hover, .find-results a:focus, .find-results a.first { background: var(--bg); }
+.find-results .note { padding: 7px 10px; margin: 0; }
 .selform { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
 .selform select, .selbar button { font: inherit; padding: 3px 8px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
 .selbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
@@ -122,6 +130,10 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
   <p class="eyebrow">Texas A&amp;M ArcGIS Online cleanup</p>
   <h1>System status, units and proposed removals <span class="badge" id="edition"></span></h1>
   <p class="sub" id="asof"></p>
+  <div class="finder" id="finder" hidden role="search">
+    <input type="search" id="find-q" placeholder="Find a person: name, NetID, account or email" autocomplete="off" aria-label="Find a person" aria-controls="find-results">
+    <div class="find-results" id="find-results" hidden></div>
+  </div>
 </header>
 <nav aria-label="Sections">
   <a href="#overview">Overview</a><a href="#removals">Proposed removals</a><a href="#review">Review</a><a href="#units">Colleges and departments</a>
@@ -777,6 +789,46 @@ function selectionCsv() {
   a.download = `PROPOSED-deletions_${X.date}_${X.from}-${X.to}_${stamp}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
 }
+/* Find a person from any page (Dan, 22 October 2026): matches on name, NetID, account or email, from the site. */
+function finderSetup() {
+  if (!SERVED || D.edition !== "full" || $("#finder").dataset.ready) return;
+  const box = $("#finder"), q = $("#find-q"), list = $("#find-results");
+  box.hidden = false; box.dataset.ready = "1";
+  let timer = null, asked = "";
+  const close = () => { list.hidden = true; };
+  const open = key => { close(); q.blur(); location.hash = "#a:" + encodeURIComponent(key); };
+  q.addEventListener("input", () => {
+    clearTimeout(timer);
+    const v = q.value.trim();
+    if (v.length < 2) { close(); return; }
+    timer = setTimeout(async () => {
+      asked = v;
+      const res = await fetch(`/api/v1/search?q=${encodeURIComponent(v)}`, { credentials: "same-origin" }).catch(() => null);
+      if (asked !== v) return;   // a newer search is under way
+      const X = res && res.ok ? await res.json() : null;
+      if (!X) { list.innerHTML = '<p class="note">The search could not be loaded.</p>'; list.hidden = false; return; }
+      list.innerHTML = X.people.length ? X.people.map((p, i) => `<a href="#a:${encodeURIComponent(p.key)}"${i ? "" : ' class="first"'}>`
+          + `<b>${esc(p.name || p.user)}</b> <span class="muted small">${esc(p.user)}${p.email && p.email.toLowerCase() !== String(p.user).toLowerCase() ? " · " + esc(p.email) : ""}</span><br>`
+          + `<span class="small">${pill(p.classification)} ${pill(p.projected)} ${esc(p.sub_unit || p.unit || "")} · last sign-in ${esc(p.last_login || "never")} · ${n(p.items)} items, ${gb(p.feature_gb)}</span></a>`).join("")
+          + (X.count > X.people.length ? `<p class="note">${n(X.count)} matches; showing the first ${n(X.people.length)}. Type more to narrow.</p>` : "")
+        : `<p class="note">No one matches "${esc(v)}".</p>`;
+      list.hidden = false;
+      list.querySelectorAll("a").forEach(a => a.addEventListener("click", close));
+    }, 250);
+  });
+  q.addEventListener("keydown", e => {
+    if (e.key === "Escape") { close(); q.value = ""; }
+    if (e.key === "Enter") { const a = list.querySelector("a"); if (a && !list.hidden) { e.preventDefault(); open(decodeURIComponent(a.getAttribute("href").slice(3))); } }
+    if (e.key === "ArrowDown") { const a = list.querySelector("a"); if (a) { e.preventDefault(); a.focus(); } }
+  });
+  list.addEventListener("keydown", e => {
+    const a = document.activeElement;
+    if (e.key === "ArrowDown" && a.nextElementSibling?.tagName === "A") { e.preventDefault(); a.nextElementSibling.focus(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); (a.previousElementSibling?.tagName === "A" ? a.previousElementSibling : q).focus(); }
+    if (e.key === "Escape") { close(); q.focus(); }
+  });
+  document.addEventListener("click", e => { if (!box.contains(e.target)) close(); });
+}
 function selectionSetup() {
   if (!SERVED || D.edition !== "full" || $("#sel-block").dataset.ready) return;
   $("#sel-block").hidden = false; $("#sel-block").dataset.ready = "1";
@@ -787,6 +839,7 @@ function selectionSetup() {
   selectionLoad(false);
 }
 function removals() {
+  finderSetup();
   selectionSetup();
   const t = D.total; const g = D.removal.slice().sort((a, b) => a.group.localeCompare(b.group));
   table("#removal", [{ h: "Group", f: r => D.group_lists || (SERVED && D.edition === "full") ? `<a class="u" href="#grp:${encodeURIComponent(r.group)}">${esc(r.group)}</a>` : esc(r.group), w: 1 },
