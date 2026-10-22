@@ -458,26 +458,29 @@ async function showScope(key) {
 /* On a department's page and on each of its groups' pages (a degree, or its faculty & staff): which group is
    shown, out of how many members, and pills to switch between "All of <department>" and each group (Dan,
    22 October 2026: selecting Faculty & staff should plainly show the page is narrowed to it). */
+const VIA_GROUP = "Shared to its groups (owner left)";   // as in build_full_dashboard.py
 function scopeBar(sc, isDegree, isStaff) {
   const bar = $("#uv-scopebar"), deptKey = sc.kind === "unit" ? null : SUB_KEY[sc.unit + "\u0001" + sc.sub], dept = deptKey ? SCOPES[deptKey] : null;
   const groups = dept ? (dept.subs || []).filter(s => s.sub && childKey(sc.unit, sc.sub, s.sub)) : [];
   bar.hidden = !groups.length;
   if (!groups.length) { bar.innerHTML = ""; return; }
   const chip = (key, label, k, on) => `<a class="pill fbtn${on ? " on" : ""}" href="#${key}"${on ? ' aria-current="page"' : ""}>${esc(label)}<span class="fcount">${n(k)}</span></a>`;
-  const name = isStaff ? "Faculty & staff" : isDegree ? degreeLabel(sc.degree) : "";
-  bar.innerHTML = (isDegree ? `<p class="scopenote">Showing <b>${esc(name)}</b> of ${esc(sc.sub)}: ${n(sc.members)} of ${n(dept.members)} members. `
+  const name = isStaff ? "Faculty & staff" : isDegree ? degreeLabel(sc.degree) : "", via = sc.degree === VIA_GROUP;
+  bar.innerHTML = (isDegree ? `<p class="scopenote">Showing <b>${esc(name)}</b> of ${esc(sc.sub)}: `
+      + (via ? `${n(sc.items)} layers of ${n(sc.owners)} former members. ` : `${n(sc.members)} of ${n(dept.members)} members. `)
       + `<a href="#${deptKey}">Back to all of ${esc(sc.sub)}</a></p>` : "")
     + `<div class="fgroup${isDegree ? " on" : ""}" role="navigation" aria-label="Groups in ${esc(sc.sub)}"><span class="flabel">Show</span>`
     + chip(deptKey, `All of ${sc.sub}`, dept.members, !isDegree)
-    + groups.map(s => chip(childKey(sc.unit, sc.sub, s.sub), s.sub, s.members, isDegree && s.sub === sc.degree)).join("") + `</div>`;
+    + groups.map(s => chip(childKey(sc.unit, sc.sub, s.sub), s.sub, s.sub === VIA_GROUP ? s.owners : s.members, isDegree && s.sub === sc.degree)).join("") + `</div>`;
 }
 function renderScope(sc) {
   const isUnit = sc.kind === "unit", isDegree = sc.kind === "degree";
   const deptLink = SUB_KEY[sc.unit + "\u0001" + sc.sub] ? `<a href="#${SUB_KEY[sc.unit + "\u0001" + sc.sub]}">${esc(sc.sub)}</a>` : esc(sc.sub);
   $("#uv-crumbs").innerHTML = `<a href="#overview">Whole organization</a> › ` + (isUnit ? esc(sc.unit) : isDegree ? `${unitLink(sc.unit)} › ${deptLink} › ${esc(sc.degree)}` : `${unitLink(sc.unit)} › ${esc(sc.sub)}`);
-  const isStaff = isDegree && sc.degree === "Faculty & staff";
-  $("#uv-title").textContent = isUnit ? sc.unit : isStaff ? `${sc.sub}: faculty & staff` : isDegree ? degreeLabel(sc.degree) : sc.sub;
+  const isStaff = isDegree && sc.degree === "Faculty & staff", isVia = isDegree && sc.degree === VIA_GROUP;
+  $("#uv-title").textContent = isUnit ? sc.unit : isStaff ? `${sc.sub}: faculty & staff` : isVia ? `${sc.sub}: shared to its groups (owner left)` : isDegree ? degreeLabel(sc.degree) : sc.sub;
   $("#uv-lede").textContent = isUnit ? "All departments, and the degrees under them, placed in this unit."
+    : isVia ? `Layers of people who have left and had no department on record, placed in ${sc.sub} because they are shared with a group owned by a current member of ${sc.sub} (often a class or project group). Not faculty and staff.`
     : isStaff ? (sc.sub === "College-level" ? `People who report to ${sc.unit} itself (dean's office and college administration), not to a department.` : `Faculty and staff of ${sc.sub}, ${sc.unit}: employees, and former employees whose department was recorded.`)
     : isDegree ? `A degree program (major code ${sc.degree}) in ${sc.sub}, ${sc.unit}: its students.`
     : sc.sub === "College-level" ? `${sc.unit} itself: its dean's office and college administration, and its college-wide degrees.` : `A department within ${sc.unit}: its faculty and staff, and the students in the degrees it offers.`;

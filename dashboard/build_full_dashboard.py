@@ -38,6 +38,9 @@ MAJOR_MAP = os.path.join(db.config_dir(), "major_department_map.csv")
 # Staff department names that mean the college itself (dean's office, college administration), Dan's review pending
 COLLEGE_LEVEL = os.path.join(db.config_dir(), "college_level_departments.csv")
 STAFF, COLLEGE_LEVEL_DEPT = "Faculty & staff", "College-level"
+# Layers of a departed owner with no department, placed in a department through the groups they are shared with
+# (often class groups), are their own group under it, never its faculty & staff (Dan, 22 October 2026).
+VIA_GROUP = "Shared to its groups (owner left)"
 sys.path.insert(0, HERE)
 from build_dashboard_data import COLLEGE_UNIT  # noqa: E402  (the directory college -> unit table the snapshot uses)
 # The website's data (21 October 2026): the page is a shell, and asks the site for everything. Per edition, the
@@ -339,10 +342,12 @@ def main():
                     if c == "current" and u != "No unit recorded"}
     items["item_unit"] = items["unit"].fillna("Unit unknown")
     items["item_sub"] = items["sub_unit"].fillna("")
+    items["via_group"] = False
     for idx in items.index[(items["status"] == "departed") & (items["item_unit"] == "Unit unknown")]:
         found = {current_unit[o] for g in item_groups.get(items.at[idx, "item_id"], ()) for o in [group_owner.get(g)] if o in current_unit}
         if len(found) == 1:
             items.at[idx, "item_unit"], items.at[idx, "item_sub"] = next(iter(found))
+            items.at[idx, "via_group"] = True
 
     def removal_group(row):  # same rules as tools/removal_summary.py
         p = row["projected_status"]
@@ -407,6 +412,8 @@ def main():
     snap["dept"], snap["degree"] = [d for d, _ in placed], [g for _, g in placed]
     placed = [place(u, s) for u, s in zip(items["item_unit"], items["item_sub"])]
     items["item_dept"], items["item_degree"] = [d for d, _ in placed], [g for _, g in placed]
+    # placed through a group: under the group owner's department, as its own group (VIA_GROUP), not their degree or staff
+    items.loc[items["via_group"] & (items["item_dept"] != ""), "item_degree"] = VIA_GROUP
     placed = [place(u, s) for u, s in zip(unit_usage["unit"].fillna("Unit unknown"), unit_usage["sub_unit"].fillna(""))]
     unit_usage["dept"], unit_usage["child"] = [d for d, _ in placed], [g for _, g in placed]
     snap_dept, snap_degree = snap["dept"], snap["degree"]
@@ -456,7 +463,7 @@ def main():
                 if entry["kind"] == "sub" and not s:
                     continue
                 g = it[it[col_i] == s]
-                subs.append({"sub": s, "current_gb": r(g.loc[g["status"] == "current", "feature_gb"].sum(), 3),
+                subs.append({"sub": s, "owners": int(g["key"].nunique()), "current_gb": r(g.loc[g["status"] == "current", "feature_gb"].sum(), 3),
                              "departed_gb": r(g.loc[g["status"] != "current", "feature_gb"].sum(), 3), "items": len(g),
                              "members": int((in_scope & (col_m == s)).sum()),
                              "degrees": int(snap_degree[in_scope & (snap_dept == s) & (snap_degree != STAFF)].replace("", pd.NA).nunique()) if entry["kind"] == "unit" else 0,
