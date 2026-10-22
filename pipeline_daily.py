@@ -22,6 +22,7 @@ separate, manual step after the maintainer's written approval (CLAUDE.md, "Delet
 
 Usage:
     python pipeline_daily.py [--skip-groups] [--members-csv F --items-csv F] [--mqs-csv F]   (files: for tests)
+    python pipeline_daily.py --dashboards-only    only steps 7 and 8, from what the database already holds
 """
 import argparse
 import datetime
@@ -87,7 +88,11 @@ def main():
     parser.add_argument("--members-csv", help="load this member report instead of fetching the newest (tests)")
     parser.add_argument("--items-csv", help="load this item report instead of fetching the newest (tests)")
     parser.add_argument("--mqs-csv", help="use this directory (MQS) lookup instead of a new one (tests)")
+    parser.add_argument("--dashboards-only", action="store_true",
+                        help="only rebuild the site's data from what the database holds, and publish it (no ArcGIS Online)")
     args = parser.parse_args()
+    if args.dashboards_only:
+        return rebuild_dashboards()
 
     try:
         with Run(None, "daily") as run:
@@ -128,12 +133,41 @@ def main():
             print(f"daily run {run.run_id} finished in {(datetime.datetime.now() - started).seconds // 60} min")
 
     finally:
-        # Once more after the run is marked succeeded or failed, so the site's copy of RUNS shows how it ended (the
-        # publish-db step inside the run copies it while the run still reads "running"). After a failure the site
-        # keeps the last good data and shows the failed run.
-        result = subprocess.run([sys.executable, "-u", "tools/publish_serving_db.py"], cwd=SCRIPT_DIR)
-        if result.returncode != 0:
-            print("the final publish failed; the site keeps the copy published during the run")
+        publish_final()
+
+
+def publish_final():
+    """Once more after a run is marked succeeded or failed, so the site's copy of RUNS shows how it ended (the
+    publish-db step inside the run copies it while the run still reads "running"). After a failure the site keeps
+    the last good data and shows the failed run."""
+    result = subprocess.run([sys.executable, "-u", "tools/publish_serving_db.py"], cwd=SCRIPT_DIR)
+    if result.returncode != 0:
+        print("the final publish failed; the site keeps the copy published during the run")
+
+
+def newest(pattern):
+    found = sorted(glob.glob(os.path.join(db.reports_dir(), "runs", *pattern), recursive=True), key=os.path.getmtime)
+    if not found:
+        raise RuntimeError(f"nothing found for {'/'.join(pattern)} under the run folders")
+    return found[-1]
+
+
+def rebuild_dashboards():
+    """--dashboards-only (22 October 2026): rebuild the site's data from what the database already holds (the newest
+    snapshot, removal summary and group inventory) and publish it. It reads nothing from ArcGIS Online, the
+    directory or Entra, so it takes minutes, not a full run: for a change to how the dashboards are built."""
+    try:
+        with Run(None, "dashboards") as run:
+            os.environ["AGOL_RUN_ID"] = run.run_id
+            started = datetime.datetime.now()
+            groups = os.path.dirname(newest(("**", "groups", "groups.csv")))
+            removal = newest(("**", "removal", "removal_summary.csv"))
+            step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", removal, "--groups", groups], run)
+            step("publish-db", ["tools/publish_serving_db.py"], run)
+            run.note(groups=groups, removal_summary=removal)
+            print(f"dashboards rebuilt in {(datetime.datetime.now() - started).seconds // 60} min, from {groups} and {removal}")
+    finally:
+        publish_final()
 
 
 if __name__ == "__main__":
