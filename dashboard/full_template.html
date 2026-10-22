@@ -316,9 +316,9 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 // A person's name (full edition only, from Entra or the AGOL account) above their account or email.
 const ITEM_URL = "https://tamu.maps.arcgis.com/home/item.html?id=";
 const itemLink = (id, title) => id ? `<a href="${ITEM_URL}${encodeURIComponent(id)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title);
-// who(id, none, dept, login): the person's name, account and links; under the name, their department or major and
-// their last sign-in, each unless the table already shows it in its own column (Dan, 22 October 2026)
-const who = (id, none, dept = true, login = true) => {
+// who(id, none, dept): the person's name, account and links; under the name, their department or major unless the
+// table already shows it in its own column. Their last sign-in is a column of its own (signIn; Dan, 22 October 2026).
+const who = (id, none, dept = true, login = false) => {
   if (!id) return none ? `<span class="muted">${none}</span>` : "";
   const key = String(id).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1");
   const name = (D.names || {})[key], owner = (D.accounts || {})[key];
@@ -334,6 +334,10 @@ const who = (id, none, dept = true, login = true) => {
   return page + where + belongs + others;
 };
 // two decimals (0.01 GB = 10 MB) below 100 GB, one above, so small holdings are visible
+// a person's last sign-in, for a "Last sign-in" column: from the places that come with each answer ("" if unknown)
+const signIn = id => { if (!id) return ""; const pl = (D.places || {})[String(id).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1")];
+  return pl ? (pl[2] || "never") : ""; };
+const signInCell = id => { const s = signIn(id); return s === "never" ? '<span class="muted">never</span>' : esc(s); };
 const gb = v => (v >= 100 ? (+v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : (+v).toFixed(2)) + " GB";
 const n = v => Math.round(+v).toLocaleString();
 const fmt = (m, v) => m.endsWith("_gb") ? gb(v) : n(v);
@@ -566,6 +570,7 @@ function renderScope(sc) {
   table("#uv-trend", [{ h: "Run", k: "as_of" }, { h: "Current", n: 1, f: r => gb(r.current_gb) }, { h: "Departed", n: 1, f: r => gb(r.departed_gb) },
     { h: "Total", n: 1, f: r => gb(r.current_gb + r.departed_gb) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.trend);
   table("#uv-items", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner, "", !isUnit), w: 1 },
+    ...(D.edition === "full" ? [{ h: "Owner's last sign-in", f: r => signInCell(r.owner) }] : []),
     ...(isUnit ? [{ h: "Department or major", f: r => r.sub_unit ? subLink(sc.unit, r.sub_unit) : "", w: 1 }] : []),
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_items);
@@ -682,7 +687,7 @@ function recycleBin(B) {
   $("#bintiles").innerHTML = [["In the recycle bin", gb(B.feature_gb), `${n(B.items)} items, ${n(B.owners)} owners`], ["File storage in the bin", gb(B.file_gb), ""]]
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
   table("#bintable", [{ h: "Item", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" },
-    ...(D.edition === "full" ? [{ h: "Owner", f: r => who(r.owner, "", false), w: 1 }] : []), { h: "Owner's unit", f: r => unitLink(r.unit), w: 1 },
+    ...(D.edition === "full" ? [{ h: "Owner", f: r => who(r.owner, "", false), w: 1 }, { h: "Owner's last sign-in", f: r => signInCell(r.owner) }] : []), { h: "Owner's unit", f: r => unitLink(r.unit), w: 1 },
     { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : '<span class="muted">not recorded</span>', w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) }], B.list.slice(0, 50));
 }
@@ -738,6 +743,7 @@ function selectionRender() {
   $("#sel-list").innerHTML = P.length ? P.map((p, i) => `<details class="selperson" data-i="${i}"><summary>
       <input type="checkbox" class="sel-p" data-i="${i}" aria-label="Select all of ${esc(p.user)}'s layers in the period">
       <span class="who">${who(p.user)}</span>${pill(p.classification)} ${pill(p.projected)} <span class="muted small">${esc(p.tier)}</span>
+      <span class="small">last sign-in ${esc(signIn(p.user) || "unknown")}</span>
       <span class="small">${n(p.items.length)} layers · ${gb(p.feature_gb)} feature · ${gb(p.file_gb)} file</span>
       <span class="small">Supervisor: ${who(p.supervisor, "none on record")}</span></summary><div class="tw"></div></details>`).join("")
     : '<p class="note">No layers in this period for these tiers.</p>';
@@ -910,6 +916,7 @@ function units() {
 
 function tops() {
   table("#topitems", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner, "", false), w: 1 },
+    ...(D.edition === "full" ? [{ h: "Owner's last sign-in", f: r => signInCell(r.owner), sort: r => signIn(r.owner) }] : []),
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : "", w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Sharing", k: "share" }, { h: "Groups", n: 1, k: "groups" }, { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_items);
@@ -983,7 +990,7 @@ async function changes() {
   if (named && list.length) {
     $("#changelist-card").innerHTML = '<h3>Accounts that changed (largest 300 by storage now)</h3><div class="tw" id="changelist"></div>';
     const st = (s, k) => s ? (k === "unit" ? unitLink(s.unit) : pill(s[k])) : '<span class="muted">not a member</span>';
-    table("#changelist", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Was", f: r => st(r.s1, "cls") }, { h: "Now", f: r => st(r.s2, "cls") },
+    table("#changelist", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Last sign-in", f: r => signInCell(r.user) }, { h: "Was", f: r => st(r.s1, "cls") }, { h: "Now", f: r => st(r.s2, "cls") },
       { h: "Unit was", f: r => st(r.s1, "unit"), w: 1 }, { h: "Unit now", f: r => st(r.s2, "unit"), w: 1 },
       { h: "Status was", f: r => st(r.s1, "proj") }, { h: "Status now", f: r => st(r.s2, "proj") },
       { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }],
@@ -1029,7 +1036,7 @@ async function renderAccount(key) {
   $("#av-details").innerHTML = `<table><tbody>${rows.map(([k, v]) => `<tr><th scope="row">${k}</th><td class="wtext">${v}</td></tr>`).join("")}</tbody></table>`;
   const others = A ? A.others : a.person ? Object.entries(D.acct).filter(([k, o]) => o.person === a.person && k !== key) : [];
   $("#av-others-block").hidden = !others.length;
-  table("#av-others", [{ h: "Account", f: ([k, o]) => who(o.user), w: 1 }, { h: "Login", f: ([k, o]) => o.login === "arcgis" ? "ArcGIS login" : "NetID" },
+  table("#av-others", [{ h: "Account", f: ([k, o]) => who(o.user), w: 1 }, { h: "Last sign-in", f: ([k, o]) => o.last_login || '<span class="muted">never</span>' }, { h: "Login", f: ([k, o]) => o.login === "arcgis" ? "ArcGIS login" : "NetID" },
     { h: "Items", n: 1, f: ([k, o]) => n(o.items) }, { h: "Feature", n: 1, f: ([k, o]) => gb(o.feature_gb) }, { h: "Projected status", f: ([k, o]) => pill(o.projected) }], others);
   const its = A ? A.items : (D.acct_items || {})[key] || [];
   $("#av-items-h").textContent = a.items > its.length ? `Items (largest ${n(its.length)} of ${n(a.items)})` : `Items (${n(its.length)})`;
@@ -1052,7 +1059,7 @@ async function renderChange(key) {
   const history = r => r.entries.map(e => `<span class="muted small">${esc(H.dates[e[0]])}</span> ` + (e.length > 1
     ? `${pill(H.classes[e[1]])} ${pill(PROJ[e[3]])} <span class="muted small">${esc(H.units[e[2]])}</span>` : '<span class="muted">not a member</span>')).join("<br>");
   rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
-  table("#cv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Unit was", f: r => r.prev_unit ? unitLink(r.prev_unit) : "", w: 1 }, { h: "Unit now", f: r => r.unit ? unitLink(r.unit) : "", w: 1 },
+  table("#cv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Last sign-in", f: r => signInCell(r.user) }, { h: "Unit was", f: r => r.prev_unit ? unitLink(r.prev_unit) : "", w: 1 }, { h: "Unit now", f: r => r.unit ? unitLink(r.unit) : "", w: 1 },
     { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "History", f: history, w: 1 },
     { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], rows);
 }
@@ -1096,7 +1103,9 @@ async function peopleView() {
     ["ArcGIS logins tied to a NetID", n(P.linked_arcgis), `of ${n(P.arcgis_total)}`]]
     .map(([k, v, s]) => `<div class="tile"><div class="l">${k}</div><div class="v">${v}</div><div class="n">${s}</div></div>`).join("");
   const acc = r => r.accounts.map(a => `${who(a.user)} <span class="muted small">(${a.login === "arcgis" ? "ArcGIS login" : "NetID"}, ${n(a.items)} items, ${gb(a.feature_gb)} feature, ${gb(a.file_gb || 0)} file, ${esc(a.projected)})</span>`).join("<br>");
-  const cols = [{ h: "#", n: 1, k: "rank" }, { h: "Person", f: r => who(r.person), w: 1 }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
+  const latest = r => r.accounts.map(a => signIn(a.user)).filter(s => s && s !== "never").sort().pop() || (r.accounts.length ? "never" : "");
+  const cols = [{ h: "#", n: 1, k: "rank" }, { h: "Person", f: r => who(r.person), w: 1 },
+    { h: "Last sign-in", f: r => latest(r) === "never" ? '<span class="muted">never</span>' : esc(latest(r)), sort: r => latest(r) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
     { h: "Current", f: r => pill(r.current ? "current" : "no current affiliation") }, { h: "Accounts", n: 1, k: "n" }, { h: "Current accounts", n: 1, k: "n_current" }, { h: "ArcGIS logins", n: 1, k: "arcgis" },
     { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Total", n: 1, f: r => gb(r.feature_gb + r.file_gb) }, { h: "In extra ArcGIS logins", n: 1, f: r => r.consolidate ? gb(r.consolidate_gb) : "" },
@@ -1112,7 +1121,7 @@ function quality() {
   const L = D.owner_links;
   $("#links-block").hidden = !L || (Array.isArray(L) ? !L.length : !L);
   if (Array.isArray(L) && L.length) table("#linkstable", [{ h: "Account", f: r => who(r[0]) + (r[6] ? "" : '<br><span class="muted small">not in this run</span>'), w: 1 },
-    { h: "Owner", f: r => who(r[1]), w: 1 }, { h: "Belongs to (NetID)", f: r => esc(r[2]) }, { h: "How it is known", f: r => esc(r[3]), w: 1 },
+    { h: "Last sign-in", f: r => signInCell(r[0]) }, { h: "Owner", f: r => who(r[1]), w: 1 }, { h: "Belongs to (NetID)", f: r => esc(r[2]) }, { h: "How it is known", f: r => esc(r[3]), w: 1 },
     { h: "Linked on", f: r => esc(r[4]) }, { h: "By", f: r => esc(r[5]) }], L);
   else if (L) $("#linkstable").innerHTML = `<p class="note">${n(L)} accounts are tied to their owner by hand (names in the full edition only).</p>`;
   table("#qualitytable", [{ h: "Gap", k: 0, f: r => esc(r[0]) }, { h: "Accounts", n: 1, f: r => n(r[1]) }, { h: "Their feature storage", n: 1, f: r => gb(r[2]) }], D.quality);
