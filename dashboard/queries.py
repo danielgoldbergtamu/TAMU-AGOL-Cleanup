@@ -149,8 +149,16 @@ def lookups(con, ids):
     ids = {norm(x) for x in ids if x}
     pick = lambda table, col: {k: v for k, v in con.execute(f"SELECT key, {col} FROM {table}").fetchall() if k in ids}
     person_of = {k: (p, n) for k, p, n in con.execute("SELECT key, person, accounts FROM DASH_PersonOf").fetchall() if k in ids}
+    # each person's unit and department or major, shown under their name everywhere (Dan, 22 October 2026); for an
+    # id with several accounts, the one that has a department wins
+    places = {}
+    for k, unit, sub in con.execute("SELECT key, unit, sub_unit FROM DASH_Account").fetchall():
+        k = norm(k)
+        if k in ids and (k not in places or (sub and not places[k][1])):
+            places[k] = [unit or "", sub or ""]
     return {"names": pick("DASH_Names", "name"), "accounts": pick("DASH_ArcgisLogins", "email"),
-            "person_of": {k: p for k, (p, _) in person_of.items()}, "person_n": {p: n for p, n in person_of.values()}}
+            "person_of": {k: p for k, (p, _) in person_of.items()}, "person_n": {p: n for p, n in person_of.values()},
+            "places": places}
 
 
 def lookups_in(con, text):

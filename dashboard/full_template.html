@@ -273,7 +273,9 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 // A person's name (full edition only, from Entra or the AGOL account) above their account or email.
 const ITEM_URL = "https://tamu.maps.arcgis.com/home/item.html?id=";
 const itemLink = (id, title) => id ? `<a href="${ITEM_URL}${encodeURIComponent(id)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title);
-const who = (id, none) => {
+// who(id, none, dept): the person's name, account and links; with dept (the default) also their department or
+// major under the name, unless the table already shows it in its own column (Dan, 22 October 2026)
+const who = (id, none, dept = true) => {
   if (!id) return none ? `<span class="muted">${none}</span>` : "";
   const key = String(id).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1");
   const name = (D.names || {})[key], owner = (D.accounts || {})[key];
@@ -283,7 +285,9 @@ const who = (id, none) => {
     : `<br><a class="small" href="#people">has ${(D.person_n || {})[p]} accounts</a>`;
   const label = name ? `${esc(name)}<br><span class="muted small">${esc(id)}</span>` : esc(id);
   const page = hasAccountPage(String(id).trim().toLowerCase()) ? `<a href="#a:${encodeURIComponent(String(id).trim().toLowerCase())}">${label}</a>` : label;
-  return page + belongs + others;
+  const pl = dept ? (D.places || {})[key] : null;
+  const where = pl && pl[1] ? `<br><span class="muted small">${subLink(pl[0], pl[1])}</span>` : "";
+  return page + where + belongs + others;
 };
 // two decimals (0.01 GB = 10 MB) below 100 GB, one above, so small holdings are visible
 const gb = v => (v >= 100 ? (+v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : (+v).toFixed(2)) + " GB";
@@ -510,11 +514,11 @@ function renderScope(sc) {
   }
   table("#uv-trend", [{ h: "Run", k: "as_of" }, { h: "Current", n: 1, f: r => gb(r.current_gb) }, { h: "Departed", n: 1, f: r => gb(r.departed_gb) },
     { h: "Total", n: 1, f: r => gb(r.current_gb + r.departed_gb) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.trend);
-  table("#uv-items", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner), w: 1 },
+  table("#uv-items", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner, "", !isUnit), w: 1 },
     ...(isUnit ? [{ h: "Department or major", f: r => r.sub_unit ? subLink(sc.unit, r.sub_unit) : "", w: 1 }] : []),
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_items);
-  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user), w: 1 }, { h: "Classification", f: r => pill(r.classification) },
+  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false), w: 1 }, { h: "Classification", f: r => pill(r.classification) },
     { h: "Department or major", k: "sub_unit", w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_users);
   table("#uv-classes", [{ h: "Classification", f: r => pill(r.classification) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.classes);
@@ -533,7 +537,7 @@ async function review() {
     + (R.owners_for_gap ? `, and the top <b>${n(R.owners_for_gap)}</b> current ${R.owners_for_gap === 1 ? "owner holds" : "owners hold"} that much on their own.` : ".");
   table("#rv-concentration", [{ h: "", k: "label" }, { h: "People", n: 1, f: r => n(r.people) }, { h: "Feature storage", n: 1, f: r => gb(r.feature_gb) },
     { h: "Share of current", n: 1, f: r => (100 * r.feature_gb / R.current_gb).toFixed(1) + "%" }], R.concentration);
-  sortableTable("#rv-top", [{ h: "#", n: 1, k: "rank", sort: "rank" }, { h: "Account", f: r => who(r.user), w: 1, sort: "user" }, { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" },
+  sortableTable("#rv-top", [{ h: "#", n: 1, k: "rank", sort: "rank" }, { h: "Account", f: r => who(r.user, "", false), w: 1, sort: "user" }, { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" },
     { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1, sort: "sub_unit" }, { h: "Items", n: 1, f: r => n(r.items), sort: "items" },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb), sort: "feature_gb" }, { h: "Cumulative", n: 1, f: r => gb(r.cumulative_gb), sort: "cumulative_gb" },
     { h: "Largest layer", k: "largest_item", w: 1, sort: "largest_item" }, { h: "Its size", n: 1, f: r => gb(r.largest_item_gb), sort: "largest_item_gb" },
@@ -613,7 +617,7 @@ async function apiData(path) {   // the site's answer, or null (opened as a file
   return viewCache[path];
 }
 function adopt(X) {   // the names, ArcGIS-login owners and people that came with an answer, for who()
-  if (X) for (const k of ["names", "accounts", "person_of", "person_n"]) if (X[k]) D[k] = Object.assign(D[k] || {}, X[k]);
+  if (X) for (const k of ["names", "accounts", "person_of", "person_n", "places"]) if (X[k]) D[k] = Object.assign(D[k] || {}, X[k]);
   return X;
 }
 async function viewData(name) { return adopt(await apiData(name)) || { ...D, source: "page" }; }
@@ -627,7 +631,7 @@ function recycleBin(B) {
   $("#bintiles").innerHTML = [["In the recycle bin", gb(B.feature_gb), `${n(B.items)} items, ${n(B.owners)} owners`], ["File storage in the bin", gb(B.file_gb), ""]]
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
   table("#bintable", [{ h: "Item", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" },
-    ...(D.edition === "full" ? [{ h: "Owner", f: r => who(r.owner), w: 1 }] : []), { h: "Owner's unit", f: r => unitLink(r.unit), w: 1 },
+    ...(D.edition === "full" ? [{ h: "Owner", f: r => who(r.owner, "", false), w: 1 }] : []), { h: "Owner's unit", f: r => unitLink(r.unit), w: 1 },
     { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : '<span class="muted">not recorded</span>', w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) }], B.list.slice(0, 50));
 }
@@ -720,11 +724,11 @@ function units() {
 }
 
 function tops() {
-  table("#topitems", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner), w: 1 },
+  table("#topitems", [{ h: "#", n: 1, k: "rank" }, { h: "Layer", f: r => itemLink(r.id, r.title), w: 1 }, { h: "Type", k: "type" }, { h: "Owner", f: r => who(r.owner, "", false), w: 1 },
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : "", w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Sharing", k: "share" }, { h: "Groups", n: 1, k: "groups" }, { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_items);
-  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user), w: 1 }, { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
+  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false), w: 1 }, { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
     { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_users);
 }
@@ -892,7 +896,7 @@ async function renderGroup(label) {
   $("#gv-tiles").innerHTML = [["Accounts", n(rows.length), ""], ["Items", n(sum("items")), ""], ["Feature storage", gb(sum("feature_gb")), ""], ["File storage", gb(sum("file_gb")), ""]]
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
   rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
-  table("#gv-table", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Login", f: r => r.login === "arcgis" ? "ArcGIS login" : "NetID" },
+  table("#gv-table", [{ h: "Account", f: r => who(r.user, "", false), w: 1 }, { h: "Login", f: r => r.login === "arcgis" ? "ArcGIS login" : "NetID" },
     { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 },
     { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) },
