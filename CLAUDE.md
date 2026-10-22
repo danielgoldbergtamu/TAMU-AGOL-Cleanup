@@ -106,7 +106,8 @@ image, checking a run) is in the private kubernetes-config repository, folder `1
   quoted Windows paths, `$env:VAR`, `&` to run a program from a variable (Dan, 21 October 2026).
   The first command of each set starts with the `cd` to its folder in the same block, joined with `;`
   (Dan, 22 October 2026).
-- **Show Dan any GitHub text (PR, issue, comment) before posting it.**
+- **Open pull requests yourself**, without showing their text first, and give Dan the link (Dan, 22 October
+  2026). Merging stays Dan's. Issue and PR comments are still shown to him before posting.
 - The page holds no data: it asks the site's API (`/api/v1/...`, `web/app.py`, `dashboard/queries.py`), which
   reads the read-only copy the daily job publishes. Check a view moved to the API against what it showed before.
 - The daily job stops unless its AGOL account can only view (`tools/check_read_only.py`). Never widen
