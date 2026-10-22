@@ -72,6 +72,9 @@ tr.dept .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em
 tr.unit .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em; display: inline-block; } tr.unit .toggle:focus-visible { outline: 2px solid var(--current); }
 .tw.tall { max-height: 75vh; overflow-y: auto; } .tw.tall th { position: sticky; top: 0; background: var(--panel); }
 th.sortable { cursor: pointer; } th.sortable:hover { color: var(--ink); }
+tr.filters th { padding-top: 0; font-weight: normal; text-transform: none; letter-spacing: 0; }
+tr.filters select { font: inherit; font-size: .8rem; max-width: 100%; padding: 2px 4px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+p.note.filtered { margin: 0 0 6px; }
 .keybox { border: 1px solid var(--line); padding: 8px 12px; margin: 0 0 14px; font-size: .84rem; }
 .keybox summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
 .keycols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 6px 24px; margin-top: 8px; }
@@ -298,20 +301,46 @@ function sortValue(c, r) {
   if (c.n) { const v = parseFloat(String(raw).replace(/,/g, "")); return isNaN(v) ? null : v; }
   return String(raw).toLowerCase();
 }
+/* A column whose every value is a status label (a pill) gets a filter under its heading, in tables of more
+   than 10 rows: All, or one label, each with its count (Dan, 22 October 2026). Filters and sorting combine. */
+const PILL_RE = /^<span class="pill[^"]*"[^>]*>([^<]*)<\/span>$/;
+const unesc = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+function pillOf(c, r) { const m = c.f ? PILL_RE.exec(String(c.f(r)).trim()) : null; return m ? unesc(m[1]) : null; }
+function filterable(cols, rows) {
+  const out = {};
+  if (rows.length <= 10) return out;
+  cols.forEach((c, i) => {
+    if (!c.f) return;
+    const counts = new Map();
+    for (const r of rows) { const v = pillOf(c, r); if (v === null) return; counts.set(v, (counts.get(v) || 0) + 1); }
+    if (counts.size >= 2 && counts.size <= 12) out[i] = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  });
+  return out;
+}
 function table(el, cols, rows, state) {
   const box = $(el); if (!box) return;
-  const st = state || { col: -1, dir: 1 };
-  let shown = rows;
+  const st = { col: -1, dir: 1, filters: {}, ...(state || {}) };
+  const fcols = filterable(cols, rows);
+  const active = Object.entries(st.filters).filter(([i, v]) => v !== "" && fcols[i]);
+  let shown = active.length ? rows.filter(r => active.every(([i, v]) => pillOf(cols[i], r) === v)) : rows;
   if (st.col >= 0) {
-    const c = cols[st.col], keyed = rows.map(r => [sortValue(c, r), r]);
+    const c = cols[st.col], keyed = shown.map(r => [sortValue(c, r), r]);
     keyed.sort((a, b) => a[0] === null ? (b[0] === null ? 0 : 1) : b[0] === null ? -1
       : st.dir * (typeof a[0] === "number" ? a[0] - b[0] : a[0].localeCompare(b[0], undefined, { numeric: true })));
     shown = keyed.map(x => x[1]);
   }
-  box.innerHTML = `<table><thead><tr>${cols.map((c, i) => `<th class="sortable${c.n ? " n" : ""}" title="Sort by this column">${c.h}${i === st.col ? (st.dir === 1 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>${
+  const filterRow = Object.keys(fcols).length ? `<tr class="filters">${cols.map((c, i) => `<th>${fcols[i] ? `<select data-col="${i}" aria-label="Show only one ${esc(c.h)}">`
+    + `<option value="">All (${n(rows.length)})</option>`
+    + fcols[i].map(([v, k]) => `<option value="${esc(v)}"${st.filters[i] === v ? " selected" : ""}>${esc(v)} (${n(k)})</option>`).join("") + `</select>` : ""}</th>`).join("")}</tr>` : "";
+  const note = active.length ? `<p class="note filtered">Showing ${n(shown.length)} of ${n(rows.length)}. <a href="#" class="clear-filters">Show all</a></p>` : "";
+  box.innerHTML = `${note}<table><thead><tr>${cols.map((c, i) => `<th class="sortable${c.n ? " n" : ""}" title="Sort by this column">${c.h}${i === st.col ? (st.dir === 1 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr>${filterRow}</thead><tbody>${
     shown.map(r => `<tr>${cols.map(c => `<td class="${c.n ? "n" : ""}${c.w ? " wtext" : ""}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-  box.querySelectorAll("th").forEach((th, i) => th.onclick = () =>
-    table(el, cols, rows, { col: i, dir: i === st.col ? -st.dir : (cols[i].n ? -1 : 1) }));
+  box.querySelectorAll("th.sortable").forEach((th, i) => th.onclick = () =>
+    table(el, cols, rows, { ...st, col: i, dir: i === st.col ? -st.dir : (cols[i].n ? -1 : 1) }));
+  box.querySelectorAll("tr.filters select").forEach(s => s.onchange = () =>
+    table(el, cols, rows, { ...st, filters: { ...st.filters, [s.dataset.col]: s.value } }));
+  const clear = box.querySelector(".clear-filters");
+  if (clear) clear.onclick = e => { e.preventDefault(); table(el, cols, rows, { ...st, filters: {} }); };
 }
 function tip(e, html) { const t = $("#tip"); t.innerHTML = html; t.hidden = false; const x = e.clientX ?? e.target.getBoundingClientRect().left + 200, y = e.clientY ?? e.target.getBoundingClientRect().top;
   t.style.left = Math.min(x + 14, innerWidth - t.offsetWidth - 8) + "px"; t.style.top = Math.max(8, Math.min(y + 14, innerHeight - t.offsetHeight - 8)) + "px"; }
