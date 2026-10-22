@@ -81,6 +81,13 @@ button.pill.fbtn .fcount { font-variant-numeric: tabular-nums; opacity: .75; mar
 button.pill.fbtn[aria-pressed="true"] { box-shadow: 0 0 0 2px currentColor; }
 button.pill.fbtn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 p.note.filtered { margin: 0 0 6px; }
+.scopebar { display: grid; gap: 8px; margin-top: 10px; }
+.scopenote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--current); background: var(--bg); }
+a.pill.fbtn { color: var(--ink-2); text-decoration: none; line-height: 1.5; }
+a.pill.fbtn .fcount { font-variant-numeric: tabular-nums; opacity: .75; margin-left: 3px; }
+a.pill.fbtn:hover { color: var(--ink); border-color: var(--ink-3); }
+a.pill.fbtn.on { color: var(--current); border-color: currentColor; box-shadow: 0 0 0 2px currentColor; }
+.fgroup.on a.pill.fbtn:not(.on) { opacity: .6; }
 .keybox { border: 1px solid var(--line); padding: 8px 12px; margin: 0 0 14px; font-size: .84rem; }
 .keybox summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
 .keycols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 6px 24px; margin-top: 8px; }
@@ -111,7 +118,8 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 
 <section class="panel stack" id="unitview" hidden aria-live="polite">
   <div class="card"><p class="crumbs" id="uv-crumbs"></p>
-  <h2 id="uv-title"></h2><p class="lede" id="uv-lede"></p></div>
+  <h2 id="uv-title"></h2><p class="lede" id="uv-lede"></p>
+  <div class="scopebar" id="uv-scopebar" hidden></div></div>
   <div class="card"><h3>Storage and members</h3><div class="tiles" id="uv-tiles"></div></div>
   <div class="card"><h3>Current accounts</h3><p class="note">People who have left are mostly counted under "Unit unknown", because a unit is rarely recorded for them, so this view shows current accounts without a share of the unit's members.</p>
     <div class="tiles" id="uv-curtiles"></div></div>
@@ -447,6 +455,22 @@ async function showScope(key) {
   if (X && decodeURIComponent(location.hash.slice(1)) === key) renderScope(X.scope);   // still the view asked for
   else if (!X) $("#uv-lede").textContent = "This view could not be loaded. Try again, or sign in again.";
 }
+/* On a department's page and on each of its groups' pages (a degree, or its faculty & staff): which group is
+   shown, out of how many members, and pills to switch between "All of <department>" and each group (Dan,
+   22 October 2026: selecting Faculty & staff should plainly show the page is narrowed to it). */
+function scopeBar(sc, isDegree, isStaff) {
+  const bar = $("#uv-scopebar"), deptKey = sc.kind === "unit" ? null : SUB_KEY[sc.unit + "\u0001" + sc.sub], dept = deptKey ? SCOPES[deptKey] : null;
+  const groups = dept ? (dept.subs || []).filter(s => s.sub && childKey(sc.unit, sc.sub, s.sub)) : [];
+  bar.hidden = !groups.length;
+  if (!groups.length) { bar.innerHTML = ""; return; }
+  const chip = (key, label, k, on) => `<a class="pill fbtn${on ? " on" : ""}" href="#${key}"${on ? ' aria-current="page"' : ""}>${esc(label)}<span class="fcount">${n(k)}</span></a>`;
+  const name = isStaff ? "Faculty & staff" : isDegree ? degreeLabel(sc.degree) : "";
+  bar.innerHTML = (isDegree ? `<p class="scopenote">Showing <b>${esc(name)}</b> of ${esc(sc.sub)}: ${n(sc.members)} of ${n(dept.members)} members. `
+      + `<a href="#${deptKey}">Back to all of ${esc(sc.sub)}</a></p>` : "")
+    + `<div class="fgroup${isDegree ? " on" : ""}" role="navigation" aria-label="Groups in ${esc(sc.sub)}"><span class="flabel">Show</span>`
+    + chip(deptKey, `All of ${sc.sub}`, dept.members, !isDegree)
+    + groups.map(s => chip(childKey(sc.unit, sc.sub, s.sub), s.sub, s.members, isDegree && s.sub === sc.degree)).join("") + `</div>`;
+}
 function renderScope(sc) {
   const isUnit = sc.kind === "unit", isDegree = sc.kind === "degree";
   const deptLink = SUB_KEY[sc.unit + "\u0001" + sc.sub] ? `<a href="#${SUB_KEY[sc.unit + "\u0001" + sc.sub]}">${esc(sc.sub)}</a>` : esc(sc.sub);
@@ -463,6 +487,7 @@ function renderScope(sc) {
     ["Items", n(sc.items), `${n(sc.owners)} owners`], ["File storage", gb(sc.file_gb), ""]];
   if (sc.kind === "sub" && alsoIn(sc.unit, sc.sub)) $("#uv-lede").insertAdjacentHTML("beforeend", ` This department also appears in another college:${alsoIn(sc.unit, sc.sub)}.`);
   $("#uv-tiles").innerHTML = t.map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  scopeBar(sc, isDegree, isStaff);
   currentTiles("#uv-curtiles", sc.current_accounts, true);
   table("#uv-removal", [{ h: "Group", k: "group", w: 1 }, { h: "Users", n: 1, f: r => n(r.users) }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }],
     sc.removal.slice().sort((a, b) => a.group.localeCompare(b.group)));
