@@ -87,7 +87,7 @@ def main():
                              "SUM(feature_gb) feature_gb, SUM(file_gb) file_gb FROM SNAP_MemberStatus GROUP BY as_of, run_id, classification, status")
         items_table, members_table = db.newest(c, "OrganizationItems_"), db.newest(c, "OrganizationMembers_")
         items = read('SELECT "Item ID" AS "item_id", "Title" AS "title", "Item Type" AS "item_type", "Owner" AS "owner", "Share Level" AS "share", '
-                     '"# of Groups shared with" AS "groups_n", "Date Created" AS "created", "Date Last Viewed" AS "last_viewed", "View Counts" AS "views", '
+                     '"# of Groups shared with" AS "groups_n", "Date Created" AS "created", "Date Modified" AS "modified", "Date Last Viewed" AS "last_viewed", "View Counts" AS "views", '
                      'COALESCE("Feature Storage Size",0)/1024.0 AS "feature_gb", COALESCE("File Storage Size",0)/1024.0 AS "file_gb", '
                      f'"In Recycle Bin" AS "in_bin" FROM {db.q(items_table)} ORDER BY "Item ID"')
         members = read('SELECT Username, Name, Email, "Login Type" AS "login", "Last Login Date" AS "last_login", "User Type" AS "user_type", '
@@ -607,11 +607,18 @@ def main():
                   "DASH_ViewData": pd.DataFrame([(ed, v, json.dumps(d, separators=(",", ":"), default=str)) for ed, vs in views.items() for v, d in vs.items()],
                                                 columns=["edition", "view", "data"]),
                   "DASH_Scope": pd.DataFrame([(ed, k, json.dumps(s, separators=(",", ":"), default=str)) for ed, ss in scopes_.items() for k, s in ss.items()],
-                                             columns=["edition", "key", "data"])}
+                                             columns=["edition", "key", "data"]),
+                  # every layer outside the recycle bin, with its dates and its owner's tier, for selecting layers for
+                  # deletion by period (Proposed removals; Dan, 22 October 2026). Full edition only.
+                  "DASH_Item": items.assign(tier=items["rgroup"])[["item_id", "title", "item_type", "key", "owner", "created", "modified",
+                                                                    "last_viewed", "feature_gb", "file_gb", "share", "tier"]]}
         with db.connect() as c:
             c.execute("BEGIN")
             for name, df in tables.items():
-                db.write(c, name, df, mode="replace", types=text(df))
+                types = text(df)
+                if name == "DASH_Item":   # real dates, for selecting by year
+                    types.update({c_: "DATE" for c_ in ("created", "modified", "last_viewed")})
+                db.write(c, name, df, mode="replace", types=types)
             c.execute("COMMIT")
         print("site tables: " + ", ".join(f"{k} {len(v)}" for k, v in tables.items()))
 

@@ -82,6 +82,18 @@ button.pill.fbtn .fcount { font-variant-numeric: tabular-nums; opacity: .75; mar
 button.pill.fbtn[aria-pressed="true"] { box-shadow: 0 0 0 2px currentColor; }
 button.pill.fbtn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 p.note.filtered { margin: 0 0 6px; }
+.selform { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+.selform select, .selbar button { font: inherit; padding: 3px 8px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
+.selbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+.selbar button:not([disabled]) { cursor: pointer; border-color: var(--ink-3); }
+.selbar button[disabled] { opacity: .5; }
+#sel-tiers label { display: inline-flex; gap: 4px; align-items: center; margin-right: 12px; font-size: .85rem; }
+.selwarn { margin: 6px 0; padding: 8px 12px; border-left: 3px solid var(--limit); background: var(--bg); }
+.selperson { border-top: 1px solid var(--line); padding: 6px 0; }
+.selperson > summary { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; cursor: pointer; list-style: none; }
+.selperson > summary::-webkit-details-marker { display: none; }
+.selperson > summary .who { min-width: 16rem; flex: 1 1 16rem; }
+.selperson table { margin: 6px 0 4px 26px; }
 .scopebar { display: grid; gap: 8px; margin-top: 10px; }
 .scopenote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--current); background: var(--bg); }
 a.pill.fbtn { color: var(--ink-2); text-decoration: none; line-height: 1.5; }
@@ -163,6 +175,24 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
   <div class="card"><h3>Feature storage, now and after each group</h3><div class="chart" id="path"></div></div>
   <div class="card"><h3>Removal groups</h3><div class="tw" id="removal"></div>
   <p class="note">Empty accounts need no backup (nothing to keep, and an SSO account is recreated at its next login). Status 2 content waits for the verified backup. Status 1 reaches status 2 after 30 days. Administrators and non-standard roles are listed for review and never counted as removable.</p></div>
+  <div class="card" id="sel-block" hidden>
+    <h3>Select layers for deletion by period</h3>
+    <p class="note">For the year-by-year Lifeboat backups: choose a period and tiers, select the layers, and download them as a
+      CSV for the delete script. <b>The CSV is a proposal, not an approval.</b> Nothing is deleted until the maintainer has
+      reviewed that list and approved it in writing, and only for years with a verified backup. Selections stay in this
+      browser until you download them; the site never deletes anything.</p>
+    <div class="selform">
+      <label>Period by <select id="sel-date"><option value="created">date created</option><option value="modified">date modified</option><option value="viewed">date last viewed</option></select></label>
+      <label>from <select id="sel-from"></select></label>
+      <label>to <select id="sel-to"></select></label>
+      <label id="sel-never-l" hidden><input type="checkbox" id="sel-never"> and never viewed</label>
+    </div>
+    <div class="fgroup" id="sel-tiers" role="group" aria-label="Tiers"></div>
+    <div id="sel-warn"></div>
+    <div class="selbar"><button type="button" id="sel-show">Show layers</button><span id="sel-summary" class="note"></span>
+      <button type="button" id="sel-csv" disabled>Download CSV of selected</button></div>
+    <div id="sel-list"></div>
+  </div>
 </section>
 
 <section class="panel stack" id="review">
@@ -274,9 +304,9 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 // A person's name (full edition only, from Entra or the AGOL account) above their account or email.
 const ITEM_URL = "https://tamu.maps.arcgis.com/home/item.html?id=";
 const itemLink = (id, title) => id ? `<a href="${ITEM_URL}${encodeURIComponent(id)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title);
-// who(id, none, dept): the person's name, account and links; with dept (the default) also their department or
-// major under the name, unless the table already shows it in its own column (Dan, 22 October 2026)
-const who = (id, none, dept = true) => {
+// who(id, none, dept, login): the person's name, account and links; under the name, their department or major and
+// their last sign-in, each unless the table already shows it in its own column (Dan, 22 October 2026)
+const who = (id, none, dept = true, login = true) => {
   if (!id) return none ? `<span class="muted">${none}</span>` : "";
   const key = String(id).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1");
   const name = (D.names || {})[key], owner = (D.accounts || {})[key];
@@ -286,8 +316,9 @@ const who = (id, none, dept = true) => {
     : `<br><a class="small" href="#people">has ${(D.person_n || {})[p]} accounts</a>`;
   const label = name ? `${esc(name)}<br><span class="muted small">${esc(id)}</span>` : esc(id);
   const page = hasAccountPage(String(id).trim().toLowerCase()) ? `<a href="#a:${encodeURIComponent(String(id).trim().toLowerCase())}">${label}</a>` : label;
-  const pl = dept ? (D.places || {})[key] : null;
-  const where = pl && pl[1] ? `<br><span class="muted small">${subLink(pl[0], pl[1])}</span>` : "";
+  const pl = (D.places || {})[key];
+  const where = (dept && pl && pl[1] ? `<br><span class="muted small">${subLink(pl[0], pl[1])}</span>` : "")
+    + (login && pl ? `<br><span class="muted small">last sign-in ${pl[2] ? esc(pl[2]) : "never"}</span>` : "");
   return page + where + belongs + others;
 };
 // two decimals (0.01 GB = 10 MB) below 100 GB, one above, so small holdings are visible
@@ -526,7 +557,7 @@ function renderScope(sc) {
     ...(isUnit ? [{ h: "Department or major", f: r => r.sub_unit ? subLink(sc.unit, r.sub_unit) : "", w: 1 }] : []),
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_items);
-  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false), w: 1 }, { h: "Classification", f: r => pill(r.classification) },
+  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Classification", f: r => pill(r.classification) },
     { h: "Department or major", k: "sub_unit", w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_users);
   table("#uv-classes", [{ h: "Classification", f: r => pill(r.classification) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.classes);
@@ -545,7 +576,7 @@ async function review() {
     + (R.owners_for_gap ? `, and the top <b>${n(R.owners_for_gap)}</b> current ${R.owners_for_gap === 1 ? "owner holds" : "owners hold"} that much on their own.` : ".");
   table("#rv-concentration", [{ h: "", k: "label" }, { h: "People", n: 1, f: r => n(r.people) }, { h: "Feature storage", n: 1, f: r => gb(r.feature_gb) },
     { h: "Share of current", n: 1, f: r => (100 * r.feature_gb / R.current_gb).toFixed(1) + "%" }], R.concentration);
-  sortableTable("#rv-top", [{ h: "#", n: 1, k: "rank", sort: "rank" }, { h: "Account", f: r => who(r.user, "", false), w: 1, sort: "user" }, { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" },
+  sortableTable("#rv-top", [{ h: "#", n: 1, k: "rank", sort: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1, sort: "user" }, { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" },
     { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1, sort: "sub_unit" }, { h: "Items", n: 1, f: r => n(r.items), sort: "items" },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb), sort: "feature_gb" }, { h: "Cumulative", n: 1, f: r => gb(r.cumulative_gb), sort: "cumulative_gb" },
     { h: "Largest layer", k: "largest_item", w: 1, sort: "largest_item" }, { h: "Its size", n: 1, f: r => gb(r.largest_item_gb), sort: "largest_item_gb" },
@@ -556,7 +587,7 @@ async function review() {
     ...R.empty_by.login_bucket.map(x => ({ k: "Last sign-in: " + x.value, a: x.accounts }))];
   table("#rv-by", [{ h: "Breakdown", k: "k", w: 1 }, { h: "Accounts", n: 1, f: r => n(r.a) }], by);
   if (!R.empty_list.length) { $("#rv-list-block").innerHTML = '<p class="note">The list of accounts names people, so it appears only in the full edition on the maintainer\'s machine.</p>'; return; }
-  const cols = [{ h: "Account", f: r => who(r.user), w: 1, sort: "user" }, { h: "In group 1", f: r => r.in_group_1 ? "yes" : "no", sort: "in_group_1" },
+  const cols = [{ h: "Account", f: r => who(r.user, "", true, false), w: 1, sort: "user" }, { h: "In group 1", f: r => r.in_group_1 ? "yes" : "no", sort: "in_group_1" },
     { h: "Projected status", f: r => pill(r.projected), sort: "projected" }, { h: "Classification", f: r => pill(r.classification), sort: "classification" }, { h: "Login", k: "login_type", sort: "login_type" },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>', sort: "last_login" }, { h: "Groups owned", n: 1, f: r => n(r.groups_owned), sort: "groups_owned" },
     { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1, sort: "supervisor" }, { h: "Cautions", k: "cautions", w: 1, sort: "cautions" }];
@@ -664,7 +695,99 @@ async function overview() {
     { h: "Owners", n: 1, f: r => n(r.owners) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }], O.classes.sort((a, b) => order.indexOf(a.classification) - order.indexOf(b.classification)));
 }
 
+/* Layers selected for deletion by period (Dan, 22 October 2026): the period by a chosen date, any tiers, people
+   and their layers in it, a selection kept in this page, and a CSV of it for the delete script. A proposal only. */
+const SEL = { data: null, chosen: new Set() };
+const RULE_TIERS = t => /^(1|2|3)\./.test(t);   // the tiers the removal rules schedule; the others are kept or under review
+async function selectionLoad(withPeople) {
+  const date = $("#sel-date").value, from = $("#sel-from").value, to = $("#sel-to").value, never = $("#sel-never").checked;
+  const tiers = withPeople ? [...document.querySelectorAll("#sel-tiers input:checked")].map(i => i.value) : [];
+  const q = new URLSearchParams({ date, never });
+  if (from) q.set("year_from", from); if (to) q.set("year_to", to); if (tiers.length) q.set("tiers", tiers.join("|"));
+  $("#sel-summary").textContent = "Loading…";
+  const res = await fetch(`/api/v1/selection?${q}`, { credentials: "same-origin" }).catch(() => null);
+  if (!res || !res.ok) { $("#sel-summary").textContent = res && res.status === 401 ? "Your sign-in has run out: reload and sign in again." : "Could not load the layers."; return; }
+  const X = adopt(await res.json());
+  SEL.data = X;
+  const years = []; for (let y = X.years[0]; y <= X.years[1]; y++) years.push(y);
+  for (const [id, v] of [["#sel-from", X.from], ["#sel-to", X.to]]) $(id).innerHTML = years.map(y => `<option${y === v ? " selected" : ""}>${y}</option>`).join("");
+  $("#sel-never-l").hidden = date !== "viewed";
+  const was = new Set(tiers);
+  $("#sel-tiers").innerHTML = '<span class="flabel">Tiers</span>' + X.tiers.map(s => `<label><input type="checkbox" value="${esc(s.tier)}"${was.has(s.tier) ? " checked" : ""}>`
+    + `${esc(s.tier || "no tier")} <span class="muted small">${n(s.layers)} layers, ${n(s.people)} people, ${gb(s.feature_gb)}</span></label>`).join("<br>");
+  const off = tiers.filter(x => !RULE_TIERS(x));
+  $("#sel-warn").innerHTML = off.length ? `<p class="selwarn"><b>Not scheduled for removal by the rules:</b> ${off.map(esc).join("; ")}. These people are kept or under review; select their layers only on purpose.</p>` : "";
+  if (!withPeople) { $("#sel-summary").textContent = "Choose tiers, then Show layers."; $("#sel-list").innerHTML = ""; return; }
+  if (X.too_many) { $("#sel-summary").textContent = `More than ${n(X.limit)} layers: choose a shorter period or fewer tiers.`; $("#sel-list").innerHTML = ""; return; }
+  SEL.chosen = new Set(); selectionRender();
+}
+function selectionRender() {
+  const X = SEL.data, P = X.people;
+  $("#sel-list").innerHTML = P.length ? P.map((p, i) => `<details class="selperson" data-i="${i}"><summary>
+      <input type="checkbox" class="sel-p" data-i="${i}" aria-label="Select all of ${esc(p.user)}'s layers in the period">
+      <span class="who">${who(p.user)}</span>${pill(p.classification)} ${pill(p.projected)} <span class="muted small">${esc(p.tier)}</span>
+      <span class="small">${n(p.items.length)} layers · ${gb(p.feature_gb)} feature · ${gb(p.file_gb)} file</span>
+      <span class="small">Supervisor: ${who(p.supervisor, "none on record")}</span></summary><div class="tw"></div></details>`).join("")
+    : '<p class="note">No layers in this period for these tiers.</p>';
+  $("#sel-list").querySelectorAll("details.selperson").forEach(d => d.addEventListener("toggle", () => { if (d.open && !d.dataset.drawn) selectionItems(d); }));
+  $("#sel-list").querySelectorAll("input.sel-p").forEach(c => {
+    c.addEventListener("click", e => e.stopPropagation());
+    c.addEventListener("change", () => { for (const it of P[+c.dataset.i].items) c.checked ? SEL.chosen.add(it[0]) : SEL.chosen.delete(it[0]); selectionSync(); });
+  });
+  selectionSync();
+}
+function selectionItems(d) {
+  const p = SEL.data.people[+d.dataset.i];
+  d.dataset.drawn = "1";
+  d.querySelector(".tw").innerHTML = `<table><thead><tr><th></th><th>Layer</th><th>Type</th><th>Created</th><th>Modified</th><th>Last viewed</th><th class="n">Feature</th><th class="n">File</th><th>Sharing</th></tr></thead><tbody>${
+    p.items.map(x => `<tr><td><input type="checkbox" class="sel-i" value="${esc(x[0])}"${SEL.chosen.has(x[0]) ? " checked" : ""} aria-label="Select ${esc(x[1])}"></td>`
+      + `<td class="wtext">${itemLink(x[0], x[1])}</td><td>${esc(x[2])}</td><td>${esc(x[3])}</td><td>${esc(x[4])}</td><td>${x[5] ? esc(x[5]) : '<span class="muted">never</span>'}</td>`
+      + `<td class="n">${gb(x[6])}</td><td class="n">${gb(x[7])}</td><td>${esc(x[8])}</td></tr>`).join("")}</tbody></table>`;
+  d.querySelectorAll("input.sel-i").forEach(c => c.addEventListener("change", () => { c.checked ? SEL.chosen.add(c.value) : SEL.chosen.delete(c.value); selectionSync(); }));
+}
+function selectionSync() {   // the person boxes (all, some or none of their layers), the totals, the download button
+  const P = SEL.data.people;
+  let layers = 0, feat = 0, file = 0, people = 0;
+  $("#sel-list").querySelectorAll("details.selperson").forEach(d => {
+    const p = P[+d.dataset.i], k = p.items.filter(x => SEL.chosen.has(x[0]));
+    const box = d.querySelector("input.sel-p");
+    box.checked = k.length === p.items.length && k.length > 0; box.indeterminate = k.length > 0 && k.length < p.items.length;
+    d.querySelectorAll("input.sel-i").forEach(c => { c.checked = SEL.chosen.has(c.value); });
+    if (k.length) { people++; layers += k.length; for (const x of k) { feat += x[6]; file += x[7]; } }
+  });
+  $("#sel-summary").textContent = `${n(P.length)} people in the period. Selected: ${n(layers)} layers of ${n(people)} people, ${gb(feat)} feature, ${gb(file)} file.`;
+  $("#sel-csv").disabled = !layers;
+}
+function selectionCsv() {
+  const X = SEL.data, made = new Date(), stamp = made.toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
+  const tiers = [...new Set(X.people.map(p => p.tier))].join("; ");
+  const q = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const col = { created: 3, modified: 4, viewed: 5 }[X.date];
+  const head = ["item_id", "title", "item_type", "owner", "owner_name", "owner_email", "unit", "department_or_major", "tier", "classification",
+    "projected_status", "supervisor", "created", "modified", "last_viewed", "feature_gb", "file_gb", "sharing", "period_by", "backup_year"];
+  const lines = [`# PROPOSED, not approved for deletion. Made ${made.toISOString()} on the AGOL Cleanup site; period by date ${X.date}, ${X.from}-${X.to}${X.never ? " and never viewed" : ""}; tiers: ${tiers}.`,
+    head.join(",")];
+  for (const p of X.people) for (const x of p.items) if (SEL.chosen.has(x[0])) {
+    const key = String(p.user).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1");
+    lines.push([x[0], x[1], x[2], p.user, (D.names || {})[key] || "", p.email, p.unit, p.sub_unit, p.tier, p.classification, p.projected, p.supervisor,
+      x[3], x[4], x[5], x[6], x[7], x[8], X.date, x[col] ? x[col].slice(0, 4) : "never viewed"].map(q).join(","));
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\r\n") + "\r\n"], { type: "text/csv" }));
+  a.download = `PROPOSED-deletions_${X.date}_${X.from}-${X.to}_${stamp}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function selectionSetup() {
+  if (!SERVED || D.edition !== "full" || $("#sel-block").dataset.ready) return;
+  $("#sel-block").hidden = false; $("#sel-block").dataset.ready = "1";
+  $("#sel-date").onchange = () => { $("#sel-from").innerHTML = $("#sel-to").innerHTML = ""; selectionLoad(false); };
+  for (const id of ["#sel-from", "#sel-to", "#sel-never"]) $(id).onchange = () => selectionLoad(false);
+  $("#sel-show").onclick = () => selectionLoad(true);
+  $("#sel-csv").onclick = selectionCsv;
+  selectionLoad(false);
+}
 function removals() {
+  selectionSetup();
   const t = D.total; const g = D.removal.slice().sort((a, b) => a.group.localeCompare(b.group));
   table("#removal", [{ h: "Group", f: r => D.group_lists || (SERVED && D.edition === "full") ? `<a class="u" href="#grp:${encodeURIComponent(r.group)}">${esc(r.group)}</a>` : esc(r.group), w: 1 },
     { h: "Users", n: 1, f: r => n(r.users) }, { h: "Items", n: 1, f: r => n(r.items) },
@@ -737,7 +860,7 @@ function tops() {
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : "", w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Sharing", k: "share" }, { h: "Groups", n: 1, k: "groups" }, { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_items);
-  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false), w: 1 }, { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
+  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
     { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_users);
 }
@@ -905,7 +1028,7 @@ async function renderGroup(label) {
   $("#gv-tiles").innerHTML = [["Accounts", n(rows.length), ""], ["Items", n(sum("items")), ""], ["Feature storage", gb(sum("feature_gb")), ""], ["File storage", gb(sum("file_gb")), ""]]
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
   rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
-  table("#gv-table", [{ h: "Account", f: r => who(r.user, "", false), w: 1 }, { h: "Login", f: r => r.login === "arcgis" ? "ArcGIS login" : "NetID" },
+  table("#gv-table", [{ h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Login", f: r => r.login === "arcgis" ? "ArcGIS login" : "NetID" },
     { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 },
     { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) },

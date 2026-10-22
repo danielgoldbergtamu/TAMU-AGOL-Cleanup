@@ -207,6 +207,22 @@ def serving_db():
         return _db["con"].cursor()
 
 
+@app.get("/api/v1/selection")
+def selection_data(request: Request, date: str = "created", year_from: int | None = None, year_to: int | None = None,
+                   tiers: str = "", never: bool = False):
+    """Layers for proposed deletion by period (full edition only): tiers is a list separated by "|". Read-only."""
+    require_user(request)
+    cur = serving_db()
+    try:
+        data = queries.selection(cur, True, date=date, year_from=year_from, year_to=year_to,
+                                 tiers=[x for x in tiers.split("|") if x], never=never)
+    finally:
+        cur.close()
+    if data is None:
+        raise HTTPException(status_code=404)
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/v1/{view}")
 def view_data(request: Request, view: str, edition: str = "full"):
     """One view's data from the database. A plain def: FastAPI runs it in a worker thread, as DuckDB blocks."""

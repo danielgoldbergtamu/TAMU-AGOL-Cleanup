@@ -152,10 +152,10 @@ def lookups(con, ids):
     # each person's unit and department or major, shown under their name everywhere (Dan, 22 October 2026); for an
     # id with several accounts, the one that has a department wins
     places = {}
-    for k, unit, sub in con.execute("SELECT key, unit, sub_unit FROM DASH_Account").fetchall():
+    for k, unit, sub, login in con.execute("SELECT key, unit, sub_unit, last_login FROM DASH_Account").fetchall():
         k = norm(k)
         if k in ids and (k not in places or (sub and not places[k][1])):
-            places[k] = [unit or "", sub or ""]
+            places[k] = [unit or "", sub or "", login or ""]   # and the last sign-in (Dan, 22 October 2026)
     return {"names": pick("DASH_Names", "name"), "accounts": pick("DASH_ArcgisLogins", "email"),
             "person_of": {k: p for k, (p, _) in person_of.items()}, "person_n": {p: n for p, n in person_of.values()},
             "places": places}
@@ -234,6 +234,54 @@ def group(con, named, key):
         return None
     found = [x for x in rows(con, "SELECT * FROM DASH_GroupList ORDER BY feature_gb DESC, items DESC, user") if rule(x["rgroup"] or "", x["items"])]
     return {"edition": "full", "group": label, "rows": found, **lookups(con, [x["user"] for x in found] + [x["supervisor"] for x in found])}
+
+
+SELECTION_DATES = {"created": "created", "modified": "modified", "viewed": "last_viewed"}
+SELECTION_LIMIT = 50000
+
+
+def selection(con, named, date="created", year_from=None, year_to=None, tiers=(), never=False):
+    """Layers for proposed deletion by period (Proposed removals; Dan, 22 October 2026). date: which date puts a
+    layer in the period (created, modified or viewed). Answers, for the period: each tier's layers, people and GB,
+    and, for the tiers asked for, the people with their layers in it (largest first). never: with date=viewed,
+    also layers never viewed. Full edition only; the site never deletes anything (the CSV made from this is a
+    proposal for review)."""
+    if not named or not has(con, "DASH_Item"):
+        return None
+    col = SELECTION_DATES.get(date)
+    if not col:
+        return None
+    lo, hi = con.execute(f"SELECT MIN(year({col})), MAX(year({col})) FROM DASH_Item").fetchone()
+    year_from, year_to = int(year_from or lo), int(year_to or hi)
+    period = f"((year(i.{col}) BETWEEN {year_from} AND {year_to})" + (f" OR i.{col} IS NULL)" if never and col == "last_viewed" else ")")
+    summary = [{"tier": tr or "", "layers": n_, "people": p_, "feature_gb": r(f_), "file_gb": r(fi_)} for tr, n_, p_, f_, fi_ in con.execute(
+        f"SELECT tier, COUNT(*), COUNT(DISTINCT key), SUM(feature_gb), SUM(file_gb) FROM DASH_Item i WHERE {period} GROUP BY tier ORDER BY tier").fetchall()]
+    out = {"edition": "full", "date": date, "from": year_from, "to": year_to, "never": bool(never and col == "last_viewed"),
+           "years": [lo, hi], "tiers": summary, "people": [], "too_many": False, "limit": SELECTION_LIMIT}
+    tiers = [x for x in tiers if x]
+    if not tiers:
+        return out
+    chosen = sum(s["layers"] for s in summary if s["tier"] in tiers)
+    if chosen > SELECTION_LIMIT:
+        out["too_many"] = True
+        return out
+    rows_ = con.execute(f"""
+        SELECT i.key, i.item_id, i.title, i.item_type, i.created, i.modified, i.last_viewed, i.feature_gb, i.file_gb, i.share, i.tier,
+               a.user, a.email, a.login, a.classification, a.projected, a.unit, a.sub_unit, a.supervisor
+        FROM DASH_Item i JOIN DASH_Account a ON a.key = i.key
+        WHERE {period} AND i.tier IN (SELECT UNNEST(?)) ORDER BY i.key, i.feature_gb DESC""", [tiers]).fetchall()
+    people = {}
+    text = lambda v: "" if v is None else str(v)
+    for (k, iid, title, typ, cr, mo, vw, fg, fi, share, tier, user, email, login, cls, proj, unit, sub, supv) in rows_:
+        p_ = people.setdefault(k, {"key": k, "user": user, "email": email or "", "login": login, "classification": cls, "projected": proj,
+                                   "tier": tier, "unit": unit, "sub_unit": sub or "", "supervisor": supv or "", "feature_gb": 0.0, "file_gb": 0.0, "items": []})
+        p_["items"].append([iid, title, typ, text(cr), text(mo), text(vw), r(fg), r(fi), share or ""])
+        p_["feature_gb"] += fg or 0
+        p_["file_gb"] += fi or 0
+    out["people"] = sorted(({**p_, "feature_gb": r(p_["feature_gb"]), "file_gb": r(p_["file_gb"])} for p_ in people.values()),
+                           key=lambda p_: -(p_["feature_gb"] + p_["file_gb"]))
+    out.update(lookups(con, [p_["user"] for p_ in out["people"]] + [p_["supervisor"] for p_ in out["people"]]))
+    return out
 
 
 VIEWS = {"base": base, "overview": overview, "history": history, "people": people, "review": review}
