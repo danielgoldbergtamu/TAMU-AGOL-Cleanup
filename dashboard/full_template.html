@@ -68,6 +68,7 @@ tr.subrow td { color: var(--ink-2); font-size: .82rem; } tr.subrow td:first-chil
 a.u { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; } a.u:hover, a.u:focus-visible { color: var(--current); text-decoration-color: currentColor; }
 a.small { font-size: .78rem; font-weight: 400; margin-left: 8px; color: var(--current); }
 .chart g.row.link { cursor: pointer; }
+.chart rect.seg:hover { stroke: var(--ink); stroke-width: 1.5; }
 tr.dept .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em; display: inline-block; } tr.dept .toggle:focus-visible { outline: 2px solid var(--current); }
 tr.unit .toggle { all: unset; cursor: pointer; color: var(--ink-3); width: 1.2em; display: inline-block; } tr.unit .toggle:focus-visible { outline: 2px solid var(--current); }
 .tw.tall { max-height: 75vh; overflow-y: auto; } .tw.tall th { position: sticky; top: 0; background: var(--panel); }
@@ -186,7 +187,7 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 <section class="panel stack" id="units">
   <div class="card"><h2>Colleges, agencies and departments</h2>
   <p class="lede">Current members by college (students) or department (employees); departed members by the department last recorded for them, or a group their content is shared with.</p></div>
-  <div class="card"><h3>By college</h3>
+  <div class="card"><h3>By college</h3><p class="note">Select a college for all of it, or the blue (current) or orange (departed) part of its bar for those members only.</p>
   <div class="controls"><label for="metric">Measure <select id="metric"><option value="feature_gb">Feature storage (GB)</option><option value="file_gb">File storage (GB)</option><option value="members">Members</option><option value="items">Items</option></select></label>
     <span class="legend"><span><span class="chip" style="background:var(--current)"></span>Current</span><span><span class="chip" style="background:var(--departed)"></span>Departed</span></span></div>
   <div class="chart" id="unitchart"></div></div>
@@ -383,8 +384,8 @@ function hbars(el, rows, f, opt = {}) {
     const lab = r.label.length > (narrow ? 20 : 42) ? r.label.slice(0, narrow ? 19 : 41) + "…" : r.label, a = x(r.a || 0), b = x(r.b || 0), by = y + (rh - bh) / 2;
     s += `<g class="row${r.href ? " link" : ""}" tabindex="0" data-i="${i}"${r.href ? ` role="link" aria-label="Open ${esc(r.label)}"` : ""}><rect class="hit" x="0" y="${y}" width="${W}" height="${rh}" fill="transparent"/>`
       + `<text x="0" y="${y + rh / 2 + 4}"${r.muted ? ' font-style="italic"' : ""}><title>${esc(r.label)}</title>${esc(lab)}</text>`
-      + (a > 0 ? `<rect x="${lw}" y="${by}" width="${Math.max(a - (b > 0 ? 2 : 0), .5)}" height="${bh}" rx="${b > 0 ? 0 : 4}" fill="var(--current)"/>` : "")
-      + (b > 0 ? `<rect x="${lw + a}" y="${by}" width="${Math.max(b, .5)}" height="${bh}" rx="4" fill="var(--departed)"/>` : "")
+      + (a > 0 ? `<rect x="${lw}" y="${by}" width="${Math.max(a - (b > 0 ? 2 : 0), .5)}" height="${bh}" rx="${b > 0 ? 0 : 4}" fill="var(--current)"${r.hrefA ? ` data-href="${r.hrefA}" class="seg"` : ""}/>` : "")
+      + (b > 0 ? `<rect x="${lw + a}" y="${by}" width="${Math.max(b, .5)}" height="${bh}" rx="4" fill="var(--departed)"${r.hrefB ? ` data-href="${r.hrefB}" class="seg"` : ""}/>` : "")
       + `<text class="val" x="${lw + a + b + 6}" y="${y + rh / 2 + 4}">${f((r.a || 0) + (r.b || 0))}</text></g>`;
     y += rh;
   });
@@ -392,7 +393,7 @@ function hbars(el, rows, f, opt = {}) {
   box.querySelectorAll("g.row").forEach(g => { const r = rows[+g.dataset.i];
     const show = e => tip(e, r.tipHtml || `<b>${esc(r.label)}</b><br>${f((r.a || 0) + (r.b || 0))}`);
     g.addEventListener("mousemove", show); g.addEventListener("focus", show); g.addEventListener("mouseleave", untip); g.addEventListener("blur", untip);
-    if (r.href) { g.addEventListener("click", () => { untip(); location.hash = r.href; });
+    if (r.href) { g.addEventListener("click", e => { untip(); location.hash = e.target?.dataset?.href || r.href; });
       g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); untip(); location.hash = r.href; } }); } });
 }
 
@@ -464,18 +465,24 @@ async function showScope(key) {
    22 October 2026: selecting Faculty & staff should plainly show the page is narrowed to it). */
 const VIA_GROUP = "Shared to its groups (owner left)";   // as in build_full_dashboard.py
 function scopeBar(sc, isDegree, isStaff) {
-  const bar = $("#uv-scopebar"), deptKey = sc.kind === "unit" ? null : SUB_KEY[sc.unit + "\u0001" + sc.sub], dept = deptKey ? SCOPES[deptKey] : null;
+  const bar = $("#uv-scopebar"), here = decodeURIComponent(location.hash.slice(1)).split("~")[0], idx = SCOPES[here] || sc;
+  const st = sc.status || "", tail = st ? "~" + st : "";
+  const sChip = (s, label, v) => `<a class="pill fbtn${s ? " " + (s === "current" ? "kept" : "listed-for-removal") : ""}${st === s ? " on" : ""}" href="#${here}${s ? "~" + s : ""}"${st === s ? ' aria-current="page"' : ""}>${label}<span class="fcount">${gb(v)}</span></a>`;
+  const statusRow = (st ? `<p class="scopenote">Showing <b>${st === "current" ? "current" : "departed"} members only</b>: ${gb(st === "current" ? idx.current_gb : idx.departed_gb)} of ${gb(idx.feature_gb)}. <a href="#${here}">Show everyone</a></p>` : "")
+    + `<div class="fgroup${st ? " on" : ""}" role="navigation" aria-label="Owners"><span class="flabel">Owners</span>${sChip("", "All", idx.feature_gb)}${sChip("current", "Current", idx.current_gb)}${sChip("departed", "Departed", idx.departed_gb)}</div>`;
+  const deptKey = sc.kind === "unit" ? null : SUB_KEY[sc.unit + "\u0001" + sc.sub], dept = deptKey ? SCOPES[deptKey] : null;
   const groups = dept ? (dept.subs || []).filter(s => s.sub && childKey(sc.unit, sc.sub, s.sub)) : [];
-  bar.hidden = !groups.length;
-  if (!groups.length) { bar.innerHTML = ""; return; }
-  const chip = (key, label, k, on) => `<a class="pill fbtn${on ? " on" : ""}" href="#${key}"${on ? ' aria-current="page"' : ""}>${esc(label)}<span class="fcount">${n(k)}</span></a>`;
+  bar.hidden = false;
+  if (!groups.length) { bar.innerHTML = statusRow; return; }
+  const chip = (key, label, k, on) => `<a class="pill fbtn${on ? " on" : ""}" href="#${key}${tail}"${on ? ' aria-current="page"' : ""}>${esc(label)}<span class="fcount">${n(k)}</span></a>`;
   const name = isStaff ? "Faculty & staff" : isDegree ? degreeLabel(sc.degree) : "", via = sc.degree === VIA_GROUP;
   bar.innerHTML = (isDegree ? `<p class="scopenote">Showing <b>${esc(name)}</b> of ${esc(sc.sub)}: `
       + (via ? `${n(sc.items)} layers of ${n(sc.owners)} former members. ` : `${n(sc.members)} of ${n(dept.members)} members. `)
       + `<a href="#${deptKey}">Back to all of ${esc(sc.sub)}</a></p>` : "")
     + `<div class="fgroup${isDegree ? " on" : ""}" role="navigation" aria-label="Groups in ${esc(sc.sub)}"><span class="flabel">Show</span>`
     + chip(deptKey, `All of ${sc.sub}`, dept.members, !isDegree)
-    + groups.map(s => chip(childKey(sc.unit, sc.sub, s.sub), s.sub, s.sub === VIA_GROUP ? s.owners : s.members, isDegree && s.sub === sc.degree)).join("") + `</div>`;
+    + groups.map(s => chip(childKey(sc.unit, sc.sub, s.sub), s.sub, s.sub === VIA_GROUP ? s.owners : s.members, isDegree && s.sub === sc.degree)).join("") + `</div>`
+    + statusRow;
 }
 function renderScope(sc) {
   const isUnit = sc.kind === "unit", isDegree = sc.kind === "degree";
@@ -504,6 +511,7 @@ function renderScope(sc) {
   if (!isDegree && subs.length) {
     const key = s => isUnit ? SUB_KEY[sc.unit + "\u0001" + s] : childKey(sc.unit, sc.sub, s);
     hbars("#uv-subchart", subs.slice(0, 30).map(s => ({ label: s.sub || "not recorded", a: s.current_gb, b: s.departed_gb, href: s.sub ? key(s.sub) : null,
+      hrefA: s.sub && key(s.sub) ? key(s.sub) + "~current" : null, hrefB: s.sub && key(s.sub) ? key(s.sub) + "~departed" : null,
       tipHtml: `<b>${esc(s.sub || "not recorded")}</b><br>Current ${gb(s.current_gb)}<br>Departed ${gb(s.departed_gb)}<br>${n(s.items)} items` })), gb);
     if (isUnit) deptTree(sc, subs);
     else table("#uv-subtable", [{ h: isUnit ? "Department" : "Degree", f: r => !r.sub ? '<span class="muted">not recorded</span>'
@@ -577,7 +585,7 @@ function route() {
     document.querySelectorAll("nav a").forEach(a => a.classList.remove("active"));
     renderAccount(h.slice(2)); scrollTo(0, 0); return;
   }
-  const sc = SCOPES[h];
+  const sc = SCOPES[h.split("~")[0]];   // "u9~departed": u9 for departed members only
   const panels = [...document.querySelectorAll("section.panel")];
   const inside = !sc && !panels.some(s => s.id === h) ? document.getElementById(h)?.closest("section.panel") : null;  // e.g. #status-key
   const view = sc ? "unitview" : panels.some(s => s.id === h) ? h : inside ? inside.id : "overview";
@@ -679,6 +687,7 @@ function units() {
   const m = $("#metric").value, list = unitData(m), f = v => fmt(m, v);
   if (UNIT_SORT) list.sort((a, b) => UNIT_SORT.k === "unit" ? UNIT_SORT.dir * a.unit.localeCompare(b.unit) : UNIT_SORT.dir * (a[UNIT_SORT.k] - b[UNIT_SORT.k]));
   hbars("#unitchart", list.map(u => ({ label: u.unit, a: u.current, b: u.departed, muted: NOT_UNITS.has(u.unit), href: UNIT_KEY[u.unit],
+    hrefA: UNIT_KEY[u.unit] && UNIT_KEY[u.unit] + "~current", hrefB: UNIT_KEY[u.unit] && UNIT_KEY[u.unit] + "~departed",
     tipHtml: `<b>${esc(u.unit)}</b><br>Current ${f(u.current)}<br>Departed ${f(u.departed)}<br>Total ${f(u.total)}` })), f);
   const arrow = k => UNIT_SORT && UNIT_SORT.k === k ? (UNIT_SORT.dir === 1 ? " ▲" : " ▼") : "";
   let h = `<thead><tr>${[["unit", "Unit", ""], ["current", "Current", "n"], ["departed", "Departed", "n"], ["total", "Total", "n"]]

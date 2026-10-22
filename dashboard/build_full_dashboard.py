@@ -425,7 +425,7 @@ def main():
                   [{"key": f"d{i}", "kind": "sub", "unit": u, "sub": s} for i, (u, s) in enumerate(dept_pairs)] + \
                   [{"key": f"g{i}", "kind": "degree", "unit": u, "sub": d, "degree": g} for i, (u, d, g) in enumerate(degree_sets)]
 
-    def scope(entry, named, top_n):
+    def scope(entry, named, top_n, status=None):
         if entry["kind"] == "unit":
             it, mem = items[items["item_unit"] == entry["unit"]], snap[snap_unit == entry["unit"]]
             tr = unit_usage[unit_usage["unit"] == entry["unit"]]
@@ -437,6 +437,9 @@ def main():
             it = items[(items["item_unit"] == entry["unit"]) & (items["item_dept"] == entry["sub"]) & (items["item_degree"] == entry["degree"])]
             mem = snap[(snap_unit == entry["unit"]) & (snap_dept == entry["sub"]) & (snap_degree == entry["degree"])]
             tr = unit_usage[(unit_usage["unit"] == entry["unit"]) & (unit_usage["dept"] == entry["sub"]) & (unit_usage["child"] == entry["degree"])]
+        if status:   # current or departed members only (the blue or orange part of a bar; Dan, 22 October 2026)
+            is_cur = lambda s: (s == "current") if status == "current" else (s != "current")
+            it, mem, tr = it[is_cur(it["status"])], mem[is_cur(mem["status"])], tr[is_cur(tr["status"])]
         cur_it, dep_it = it[it["status"] == "current"], it[it["status"] != "current"]
         out = {"members": len(mem), "current_members": int((mem["status"] == "current").sum()), "owners": int(it["key"].nunique()),
                "items": len(it), "feature_gb": r(it["feature_gb"].sum(), 3), "file_gb": r(it["file_gb"].sum(), 3),
@@ -543,6 +546,12 @@ def main():
     def scopes(named):
         return {e["key"]: {**e, **scope(e, named, 15 if e["kind"] == "unit" else 10)} for e in scope_index}
 
+    def status_scopes(named):
+        """Each view for current members only and for departed members only, keyed "<key>~current" and
+        "<key>~departed": for the site (DASH_Scope), not the index."""
+        return {f'{e["key"]}~{s}': {**e, "status": s, **scope(e, named, 15 if e["kind"] == "unit" else 10, s)}
+                for e in scope_index for s in ("current", "departed")}
+
     def edition(named):
         def owner_label(rank, row):
             return row["owner"] if named else f"Owner #{rank} ({row['unit'] if isinstance(row['unit'], str) else 'unit unknown'})"
@@ -611,6 +620,7 @@ def main():
     os.makedirs(out, exist_ok=True)
     for named in (True, False):
         data = edition(named)
+        by_status = status_scopes(named)
         if named:
             # only the names of people who appear on the page
             shown = set(re.findall(r"[a-z0-9._%+-]+@[a-z0-9.-]+|[a-z0-9._-]{3,}", json.dumps({k_: v_ for k_, v_ in data.items() if k_ != "history"}, default=str).lower()))   # the history lists everyone; not "shown"
@@ -638,7 +648,7 @@ def main():
         if not named:
             # The published edition must name no one. Refuse to write its data if any account name, or any
             # NetID-length local part, appears as a word, except words that are part of a unit name.
-            words = set(re.findall(r"[a-z0-9._@-]{3,}", json.dumps(data, default=str).lower()))
+            words = set(re.findall(r"[a-z0-9._@-]{3,}", (json.dumps(data, default=str) + json.dumps(by_status, default=str)).lower()))
             unit_words = set(re.findall(r"[a-z0-9._@-]{3,}", " ".join(map(str, list(snap["unit"]) + list(snap["sub_unit"]))).lower()))
             usernames = set(snap["username"].str.strip().str.lower())
             locals_ = {u.split("@")[0] for u in usernames if len(u.split("@")[0]) >= 5}
@@ -655,7 +665,7 @@ def main():
         if named:   # which accounts have a page, for the links
             base["account_keys"] = sorted(snap["key"])
         site_views[data["edition"]] = {"base": base, **{k: data[k] for k in SITE_VIEWS}}
-        site_scopes[data["edition"]] = data["scopes"]
+        site_scopes[data["edition"]] = {**data["scopes"], **by_status}
     write_site_tables(*site["pages"], person_names, arcgis_email, site["person_of"], site["counts"], site["group_list"], site_views, site_scopes)
 
 
