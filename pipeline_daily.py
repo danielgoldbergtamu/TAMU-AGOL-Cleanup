@@ -13,7 +13,8 @@ Steps, each its own process (DuckDB has one writer at a time; each step opens th
   3. catalog           the newest AGOL reports, the directory (MQS) lookup, history (TAMU_AGOL_Catalog.py)
   4. delete status     a DRY RUN only: projected statuses, nothing saved (TAMU_AGOL_DeleteStatus.py --dry-run)
   5. removal summary   counts and review lists (tools/removal_summary.py)
-  6. snapshot          one row per member for this report date (dashboard/build_dashboard_data.py)
+  6. snapshot          one row per member for this report date (dashboard/build_dashboard_data.py); a rerun on the
+                       same date adds another, and the newest is the one shown
   7. dashboards        both editions' data, into the database (DASH_* tables) (dashboard/build_full_dashboard.py)
   8. publish-db        the website's read-only copy of the tables it reads (tools/publish_serving_db.py)
 
@@ -119,7 +120,9 @@ def main():
             changes = os.path.join(run.dir, "deletestatus-dryrun", "DeleteStatus_changes.csv")
             removal = run.path("removal")
             step("removal", ["tools/removal_summary.py", "--changes", changes, "--out", removal], run)
-            step("snapshot", ["dashboard/build_dashboard_data.py", "--groups", groups, "--out", run.path("dashboard-data"), "--changes", changes,
+            # --again: a rerun on the same report date adds its own snapshot, and the site uses the newest, so a change
+            # such as a new account link shows at once; earlier snapshots are kept (Dan, 22 October 2026)
+            step("snapshot", ["dashboard/build_dashboard_data.py", "--again", "--groups", groups, "--out", run.path("dashboard-data"), "--changes", changes,
                               "--removal-summary", os.path.join(removal, "removal_summary.csv")], run)
             step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", os.path.join(removal, "removal_summary.csv"),
                                 "--groups", groups], run)
