@@ -298,6 +298,9 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 <section class="panel stack" id="quality">
   <div class="card"><h2>Data quality</h2><p class="lede">Gaps that affect the numbers above.</p></div>
   <div class="card"><div class="tw" id="qualitytable"></div></div>
+  <div class="card" id="protected-block" hidden><h3>Protected accounts</h3><p class="note">Never put up for deletion: their
+    delete status is always 0 (kept), and their layers cannot be selected for deletion (protected_accounts.csv in the private
+    repository). Protection stays until its row is removed.</p><div class="tw" id="protectedtable"></div></div>
   <div class="card" id="links-block" hidden><h3>Accounts tied to their owner by hand</h3><p class="note">The maintainer's links
     (account_owners.csv in the private repository). Each counts fully: the account is its owner's, kept while the owner is
     current. A link stays until its row is removed.</p><div class="tw" id="linkstable"></div></div>
@@ -741,7 +744,8 @@ async function selectionLoad(withPeople) {
 function selectionRender() {
   const X = SEL.data, P = X.people;
   $("#sel-list").innerHTML = P.length ? P.map((p, i) => `<details class="selperson" data-i="${i}"><summary>
-      <input type="checkbox" class="sel-p" data-i="${i}" aria-label="Select all of ${esc(p.user)}'s layers in the period">
+      <input type="checkbox" class="sel-p" data-i="${i}"${p.protected ? ' disabled title="Protected: never put up for deletion"' : ""} aria-label="Select all of ${esc(p.user)}'s layers in the period">
+      ${p.protected ? '<span class="pill kept" title="' + esc(p.protected) + '">protected</span>' : ""}
       <span class="who">${who(p.user)}</span>${pill(p.classification)} ${pill(p.projected)} <span class="muted small">${esc(p.tier)}</span>
       <span class="small">last sign-in ${esc(signIn(p.user) || "unknown")}</span>
       <span class="small">${n(p.items.length)} layers · ${gb(p.feature_gb)} feature · ${gb(p.file_gb)} file</span>
@@ -750,7 +754,7 @@ function selectionRender() {
   $("#sel-list").querySelectorAll("details.selperson").forEach(d => d.addEventListener("toggle", () => { if (d.open && !d.dataset.drawn) selectionItems(d); }));
   $("#sel-list").querySelectorAll("input.sel-p").forEach(c => {
     c.addEventListener("click", e => e.stopPropagation());
-    c.addEventListener("change", () => { for (const it of P[+c.dataset.i].items) c.checked ? SEL.chosen.add(it[0]) : SEL.chosen.delete(it[0]); selectionSync(); });
+    c.addEventListener("change", () => { if (P[+c.dataset.i].protected) return; for (const it of P[+c.dataset.i].items) c.checked ? SEL.chosen.add(it[0]) : SEL.chosen.delete(it[0]); selectionSync(); });
   });
   selectionSync();
 }
@@ -758,7 +762,7 @@ function selectionItems(d) {
   const p = SEL.data.people[+d.dataset.i];
   d.dataset.drawn = "1";
   d.querySelector(".tw").innerHTML = `<table><thead><tr><th></th><th>Layer</th><th>Type</th><th>Created</th><th>Modified</th><th>Last viewed</th><th class="n">Feature</th><th class="n">File</th><th>Sharing</th></tr></thead><tbody>${
-    p.items.map(x => `<tr><td><input type="checkbox" class="sel-i" value="${esc(x[0])}"${SEL.chosen.has(x[0]) ? " checked" : ""} aria-label="Select ${esc(x[1])}"></td>`
+    p.items.map(x => `<tr><td><input type="checkbox" class="sel-i" value="${esc(x[0])}"${SEL.chosen.has(x[0]) ? " checked" : ""}${p.protected ? " disabled" : ""} aria-label="Select ${esc(x[1])}"></td>`
       + `<td class="wtext">${itemLink(x[0], x[1])}</td><td>${esc(x[2])}</td><td>${esc(x[3])}</td><td>${esc(x[4])}</td><td>${x[5] ? esc(x[5]) : '<span class="muted">never</span>'}</td>`
       + `<td class="n">${gb(x[6])}</td><td class="n">${gb(x[7])}</td><td>${esc(x[8])}</td></tr>`).join("")}</tbody></table>`;
   d.querySelectorAll("input.sel-i").forEach(c => c.addEventListener("change", () => { c.checked ? SEL.chosen.add(c.value) : SEL.chosen.delete(c.value); selectionSync(); }));
@@ -1032,7 +1036,7 @@ async function renderAccount(key) {
     ["Login", a.login === "arcgis" ? "ArcGIS login" : "NetID (single sign-on)"], ["Role", esc(a.role)], ["Owner status (Entra)", pill(a.classification)],
     ["Unit", unitLink(a.unit)], ["Department or major", a.sub_unit ? subLink(a.unit, a.sub_unit) : '<span class="muted">not recorded</span>'],
     ["Supervisor", who(a.supervisor, "none on record")], ["Last sign-in", a.last_login || '<span class="muted">never</span>'],
-    ["Delete status now", esc(a.status)], ["Projected status (this run's dry run)", pill(a.projected)], ["Removal group", esc(a.group)]];
+    ["Delete status now", esc(a.status) + (a.protected ? `<br><b>Protected:</b> ${esc(a.protected)}` : "")], ["Projected status (this run's dry run)", pill(a.projected)], ["Removal group", esc(a.group)]];
   $("#av-details").innerHTML = `<table><tbody>${rows.map(([k, v]) => `<tr><th scope="row">${k}</th><td class="wtext">${v}</td></tr>`).join("")}</tbody></table>`;
   const others = A ? A.others : a.person ? Object.entries(D.acct).filter(([k, o]) => o.person === a.person && k !== key) : [];
   $("#av-others-block").hidden = !others.length;
@@ -1118,6 +1122,11 @@ async function peopleView() {
 }
 
 function quality() {
+  const PR = D.protected;
+  $("#protected-block").hidden = !PR || (Array.isArray(PR) ? !PR.length : !PR);
+  if (Array.isArray(PR) && PR.length) table("#protectedtable", [{ h: "Account", f: r => who(r[0]) + (r[4] ? "" : '<br><span class="muted small">not in this run</span>'), w: 1 },
+    { h: "Last sign-in", f: r => signInCell(r[0]) }, { h: "Why", f: r => esc(r[1]), w: 1 }, { h: "Protected on", f: r => esc(r[2]) }, { h: "By", f: r => esc(r[3]) }], PR);
+  else if (PR) $("#protectedtable").innerHTML = `<p class="note">${n(PR)} accounts are protected (names in the full edition only).</p>`;
   const L = D.owner_links;
   $("#links-block").hidden = !L || (Array.isArray(L) ? !L.length : !L);
   if (Array.isArray(L) && L.length) table("#linkstable", [{ h: "Account", f: r => who(r[0]) + (r[6] ? "" : '<br><span class="muted small">not in this run</span>'), w: 1 },

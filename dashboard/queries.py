@@ -289,13 +289,14 @@ def selection(con, named, date="created", year_from=None, year_to=None, tiers=()
         return out
     rows_ = con.execute(f"""
         SELECT i.key, i.item_id, i.title, i.item_type, i.created, i.modified, i.last_viewed, i.feature_gb, i.file_gb, i.share, i.tier,
-               a.user, a.email, a.login, a.classification, a.projected, a.unit, a.sub_unit, a.supervisor
+               a.user, a.email, a.login, a.classification, a.projected, a.unit, a.sub_unit, a.supervisor, a.protected
         FROM DASH_Item i JOIN DASH_Account a ON a.key = i.key
         WHERE {period} AND i.tier IN (SELECT UNNEST(?)) ORDER BY i.key, i.feature_gb DESC""", [tiers]).fetchall()
     people = {}
     text = lambda v: "" if v is None else str(v)
-    for (k, iid, title, typ, cr, mo, vw, fg, fi, share, tier, user, email, login, cls, proj, unit, sub, supv) in rows_:
+    for (k, iid, title, typ, cr, mo, vw, fg, fi, share, tier, user, email, login, cls, proj, unit, sub, supv, prot) in rows_:
         p_ = people.setdefault(k, {"key": k, "user": user, "email": email or "", "login": login, "classification": cls, "projected": proj,
+                                   "protected": prot or "",
                                    "tier": tier, "unit": unit, "sub_unit": sub or "", "supervisor": supv or "", "feature_gb": 0.0, "file_gb": 0.0, "items": []})
         p_["items"].append([iid, title, typ, text(cr), text(mo), text(vw), r(fg), r(fi), share or ""])
         p_["feature_gb"] += fg or 0

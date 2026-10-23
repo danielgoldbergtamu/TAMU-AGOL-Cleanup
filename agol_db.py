@@ -13,7 +13,8 @@
 #   AGOL_OUTPUT_DIR   the web app's read-only copy of the database, and last_run.json (default data/)
 #
 # In AGOL_CONFIG_DIR, account_owners.csv lists accounts the maintainer has tied to their owner by hand
-# (account_owner_links): account, owner, note, decided_on, decided_by.
+# (account_owner_links): account, owner, note, decided_on, decided_by. protected_accounts.csv lists accounts that are
+# never put up for deletion (protected_accounts): account, note, decided_on, decided_by.
 
 import os
 import re
@@ -48,6 +49,26 @@ def account_owner_links():
         if row.get("account") and row.get("owner"):
             links.append({**row, "account": row["account"].lower(), "owner": row["owner"].lower()})
     return links
+
+
+PROTECTED_FILE = "protected_accounts.csv"
+
+
+def protected_accounts():
+    """{account (lower): its row} for the accounts the maintainer has protected (23 October 2026, Dan: an account
+    "we should not auto delete"), from AGOL_CONFIG_DIR/protected_accounts.csv. A protected account's delete status is
+    always 0 (kept), in a dry run and a real run, whatever its owner's status, and its layers cannot be selected for
+    deletion on the site. Remove the row to undo. No file: none protected."""
+    import csv
+    path = os.path.join(config_dir(), PROTECTED_FILE)
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    for row in csv.DictReader(open(path, encoding="utf-8-sig")):
+        row = {k: (v or "").strip() for k, v in row.items() if k}
+        if row.get("account"):
+            out[row["account"].lower()] = row
+    return out
 
 
 def apply_owner_links(person_of, links=None):

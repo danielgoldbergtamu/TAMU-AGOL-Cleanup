@@ -147,6 +147,7 @@ def main():
             person_of[u.strip().lower()] = netid.strip().lower()
     # the maintainer's links last, so they win (agol_db.account_owner_links; Dan, 22 October 2026)
     owner_links = db.account_owner_links()
+    protected = db.protected_accounts()   # never put up for deletion (Dan, 23 October 2026)
     db.apply_owner_links(person_of, owner_links)
     linked = {l["account"]: f'linked by hand on {l.get("decided_on", "")}' + (f': {l["note"]}' if l.get("note") else "") for l in owner_links}
     snap["person"] = snap["key"].map(person_of)
@@ -192,6 +193,7 @@ def main():
                        "status": status_label.get(a["delete_status"], "none yet"), "projected": status_label.get(a["projected_status"], "not assessed"),
                        "group": a["rgroup"], "supervisor": a["supervisor"] if isinstance(a["supervisor"], str) else "",
                        "linked": linked.get(k, ""),
+                       "protected": (f'protected by the maintainer on {protected[k].get("decided_on", "")}' + (f': {protected[k]["note"]}' if protected[k].get("note") else "")) if k in protected else "",
                        "shown_items": 0 if g is None else min(len(g), max_items)}
             if g is not None:
                 acct_items[k] = [[x.item_id, x.title, x.item_type, r(x.feature_gb, 3), r(x.file_gb, 3), x.share, date_str(x.last_viewed), date_str(x.created)]
@@ -584,6 +586,7 @@ def main():
                 "classes": classes, "removal": removal, "units": units, "unit_trend": unit_trend, "item_types": item_types,
                 "viewed": viewed, "logins": logins, "roles": roles, "login_types": logintypes, "top_items": ti, "top_users": tu,
                 "history": change_history(named), "quality": quality,
+                "protected": [[k, p_.get("note", ""), p_.get("decided_on", ""), p_.get("decided_by", ""), k in set(snap["key"])] for k, p_ in protected.items()] if named else len(protected),
                 "owner_links": [[l["account"], l["owner"], person_of.get(l["account"], ""), l.get("note", ""), l.get("decided_on", ""),
                                  l.get("decided_by", ""), l["account"] in set(snap["key"])] for l in owner_links] if named else len(owner_links),
                 "runs": runs.astype(str).to_dict("records"), "scopes": scopes(named), "review": review(named), "degree_names": degree_names, "degree_notes": unconfirmed,

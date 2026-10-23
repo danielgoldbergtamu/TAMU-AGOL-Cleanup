@@ -18,7 +18,7 @@ import os
 from os import getenv
 from dotenv import load_dotenv
 
-from agol_db import apply_owner_links, connect, exists, q, read, reports_dir, write
+from agol_db import apply_owner_links, connect, exists, protected_accounts, q, read, reports_dir, write
 from TAMU_AGOL_UserQuotas import collect_table_names
 from TAMU_AGOL_Runs import Run
 
@@ -148,6 +148,7 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
     """Recalculates every member's DeleteStatus from the latest EntraID lookup and writes it back.
 
     Rules, applied to every member on every run (2 October 2026 rewrite, register AGOL-024):
+      - protected by the maintainer (protected_accounts.csv) -> 0, always
       - Override set                         -> 0
       - another account of the same person is current -> 0. Accounts are tied to a person by the NetID the
         Entra lookup matched (HIST_AccountNetIDs), so an ArcGIS login with any username (a class or project
@@ -182,6 +183,7 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
     current_people = {person[u] for u, (status, groups) in lookup.items()
                       if u in person and status == 1 and groups & whitelisted_group_ids}
 
+    protected = protected_accounts()   # never put up for deletion (the maintainer's list)
     changes = []
     unflagged_before = max(1, int((delete_status_df['DeleteStatus'] == 0).sum()))
 
@@ -198,7 +200,10 @@ def Calculate_Delete_Status(delete_status_df, entraid_status_df, empty_users, dr
         username = str(row.Username).strip().lower()
         entra = lookup.get(username)
 
-        if row.Override:
+        if username in protected:
+            set_status(row.Index, row, 0, "protected by the maintainer", None, None)
+
+        elif row.Override:
             set_status(row.Index, row, 0, "override", None, None)
 
         elif person.get(username) in current_people and not (entra and entra[0] == 1 and entra[1] & whitelisted_group_ids):
