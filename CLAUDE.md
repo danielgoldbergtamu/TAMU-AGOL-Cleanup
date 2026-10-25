@@ -104,8 +104,8 @@ image, checking a run) is in the private kubernetes-config repository, folder `1
   and check each result with him. Reading the cluster is fine.
 - **Every command for Dan is Windows PowerShell 5.1**, in a `powershell` block, one command per block: no `&&`,
   quoted Windows paths, `$env:VAR`, `&` to run a program from a variable (Dan, 21 October 2026).
-  The first command of each set starts with the `cd` to its folder in the same block, joined with `;`
-  (Dan, 22 October 2026).
+  Every command that depends on a folder starts with the `cd` to it in the same block, joined with `;`, so
+  each block works on its own even if a step is skipped (Dan, 22 and 25 October 2026).
 - **Open pull requests yourself**, without showing their text first, and give Dan the link (Dan, 22 October
   2026). Merging stays Dan's. Issue and PR comments are still shown to him before posting.
 - The page holds no data: it asks the site's API (`/api/v1/...`, `web/app.py`, `dashboard/queries.py`), which
