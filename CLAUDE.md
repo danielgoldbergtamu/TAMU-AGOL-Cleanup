@@ -104,8 +104,8 @@ image, checking a run) is in the private kubernetes-config repository, folder `1
   and check each result with him. Reading the cluster is fine.
 - **Every command for Dan is Windows PowerShell 5.1**, in a `powershell` block, one command per block: no `&&`,
   quoted Windows paths, `$env:VAR`, `&` to run a program from a variable (Dan, 21 October 2026).
-  The first command of each set starts with the `cd` to its folder in the same block, joined with `;`
-  (Dan, 22 October 2026).
+  Every command that depends on a folder starts with the `cd` to it in the same block, joined with `;`, so
+  each block works on its own even if a step is skipped (Dan, 22 and 25 October 2026).
 - **Open pull requests yourself**, without showing their text first, and give Dan the link (Dan, 22 October
   2026). Merging stays Dan's. Issue and PR comments are still shown to him before posting.
 - The page holds no data: it asks the site's API (`/api/v1/...`, `web/app.py`, `dashboard/queries.py`), which
@@ -130,12 +130,18 @@ cluster (kubernetes-config `10. AGOL Cleanup/04-create-lookup-tables.ps1`). A li
 
 owner's, kept while the owner is current (`agol_db.apply_owner_links`, used by the delete status and the
 
-dashboard). Links do not expire; remove the row to undo one.## Protected accounts
-
-When Dan says an account must not be deleted automatically, add it to the private repository's
-`config/protected_accounts.csv` (account, note in his words, decided_on, decided_by), after checking the account
-exists. Commit and push it, then give him `04-create-lookup-tables.ps1` to update the cluster. A protected account's
-delete status is always 0, whatever its owner's status (`agol_db.protected_accounts`, in `TAMU_AGOL_DeleteStatus.py`),
+dashboard). Links do not expire; remove the row to undo one.## Protected accounts
+
+
+
+When Dan says an account must not be deleted automatically, add it to the private repository's
+
+`config/protected_accounts.csv` (account, note in his words, decided_on, decided_by), after checking the account
+
+exists. Commit and push it, then give him `04-create-lookup-tables.ps1` to update the cluster. A protected account's
+
+delete status is always 0, whatever its owner's status (`agol_db.protected_accounts`, in `TAMU_AGOL_DeleteStatus.py`),
+
 and its layers cannot be selected for deletion on the site. Remove the row to undo.## Where knowledge is kept
 
 **In the repositories, never only in an assistant's memory** (Dan, 21 October 2026): another machine or
