@@ -20,6 +20,10 @@ COPY dashboard/ dashboard/
 COPY tools/ tools/
 COPY web/ web/
 
+# The build fails if anything the daily job or the site imports is missing (5 November 2026: a new build lacked six,
+# which arcgis needs, and the daily job broke at its first ArcGIS step).
+RUN python -c "import arcgis, arcgis.gis, arcgis.gis.clone, arcgis.features, arcgis.raster, duckdb, pandas, dotenv, fastapi, uvicorn, authlib, six, agol_db; print('imports ok')"
+
 RUN useradd --uid 10001 --create-home agol && mkdir -p /data /config && chown agol /data
 USER 10001
 EXPOSE 8000

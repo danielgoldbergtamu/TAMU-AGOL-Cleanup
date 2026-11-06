@@ -4,3 +4,7 @@ duckdb==1.3.2
 pandas==2.3.0
 requests==2.32.5
 python-dotenv==1.1.0
+# arcgis imports six but does not declare it; it came through python-dateutil, whose 4.0.0 dropped it. Without these
+# two pins a new build broke the daily job (5 November 2026: "No module named 'six'"). The image build now checks.
+python-dateutil==2.9.0.post0
+six==1.17.0
