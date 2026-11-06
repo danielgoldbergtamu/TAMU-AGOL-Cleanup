@@ -258,6 +258,27 @@ def search(con, named, q, limit=25):
     return {"edition": "full", "q": q, "count": len(found), "people": [x[2] for x in found[:limit]]}
 
 
+CONTACT_COLUMNS = ["name", "email", "affiliation", "all_affiliations", "title", "department_or_major", "unit", "college",
+                   "accounts", "account_count", "items", "feature_gb", "file_gb", "last_sign_in"]
+
+
+def contacts(con, named, affiliations=(), owners=False):
+    """Current people, one row each, for a message to ArcGIS Online users (Dan, 5 November 2026). affiliations: keep
+    only these main affiliations (none: all); owners: only people who own content. Full edition only."""
+    if not named or not has(con, "DASH_Contact"):
+        return None
+    where, params = ["1=1"], []
+    if affiliations:
+        where.append("affiliation IN (SELECT UNNEST(?))")
+        params.append(list(affiliations))
+    if owners:
+        where.append("items > 0")
+    cols = ", ".join(f'"{c_}"' for c_ in CONTACT_COLUMNS)
+    rows_ = con.execute(f"SELECT {cols} FROM DASH_Contact WHERE {' AND '.join(where)} ORDER BY affiliation, name", params).fetchall()
+    summary = con.execute("SELECT affiliation, COUNT(*), COUNT(*) FILTER (items > 0) FROM DASH_Contact GROUP BY 1 ORDER BY 2 DESC").fetchall()
+    return {"columns": CONTACT_COLUMNS, "rows": rows_, "summary": [{"affiliation": a or "", "people": p_, "owners": o_} for a, p_, o_ in summary]}
+
+
 SELECTION_DATES = {"created": "created", "modified": "modified", "viewed": "last_viewed"}
 SELECTION_LIMIT = 50000
 

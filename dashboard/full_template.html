@@ -261,6 +261,14 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
 
 <section class="panel stack" id="accounts">
   <div class="card"><h2>Accounts</h2><p class="lede">How long since members last signed in, and the account mix.</p></div>
+  <div class="card" id="contacts-block" hidden><h3>Contacts of current members</h3>
+    <p class="note">For a message to everyone who uses ArcGIS Online: current members, one row per person (several accounts
+      are one row), with name, email, affiliation (from their Entra groups), title, department or major, college, accounts,
+      content and last sign-in. It names people: keep the file on a university-managed computer, never in a repository.</p>
+    <div class="fgroup" id="contacts-affil" role="group" aria-label="Affiliations"></div>
+    <div class="selbar"><label><input type="checkbox" id="contacts-owners"> only people who own content</label>
+      <span class="note" id="contacts-count"></span><a class="pill fbtn" id="contacts-csv" href="#">Download contacts (CSV)</a></div>
+  </div>
   <div class="grid2 cards"><div class="card"><h3>Last sign-in by classification</h3><div class="tw" id="logins"></div></div><div class="card"><h3>Roles and login types</h3><div class="tw" id="roles"></div></div></div>
 </section>
 
@@ -1010,7 +1018,29 @@ function content() {
     buckets.map(b => { const o = { b, items: 0 }; D.viewed.filter(v => v.bucket === b).forEach(v => { o[v.status] = (o[v.status] || 0) + v.feature_gb; o.items += v.items; }); return o; }));
 }
 
+/* Contacts of current members (Dan, 5 November 2026), from the site; the download is made there. */
+async function contactsSetup() {
+  if (!SERVED || D.edition !== "full" || $("#contacts-block").dataset.ready) return;
+  $("#contacts-block").dataset.ready = "1";
+  const res = await fetch("/api/v1/contacts", { credentials: "same-origin" }).catch(() => null);
+  if (!res || !res.ok) return;
+  const X = await res.json();
+  $("#contacts-block").hidden = false;
+  $("#contacts-affil").innerHTML = '<span class="flabel">Affiliation</span>' + X.summary.map(s => `<label><input type="checkbox" value="${esc(s.affiliation)}" checked> `
+    + `${esc(s.affiliation || "none recorded")} <span class="muted small">${n(s.people)} people, ${n(s.owners)} own content</span></label>`).join(" ");
+  const sync = async () => {
+    const all = [...document.querySelectorAll("#contacts-affil input")], on = all.filter(i => i.checked).map(i => i.value);
+    const q = new URLSearchParams({ owners: $("#contacts-owners").checked });
+    if (on.length < all.length) q.set("affiliations", on.join("|"));
+    $("#contacts-csv").href = `/api/v1/contacts?${q}&format=csv`;
+    const r = await fetch(`/api/v1/contacts?${q}`, { credentials: "same-origin" }).catch(() => null);
+    $("#contacts-count").textContent = r && r.ok ? `${n((await r.json()).count)} people in the file` : "";
+  };
+  document.querySelectorAll("#contacts-affil input, #contacts-owners").forEach(i => i.addEventListener("change", sync));
+  sync();
+}
 function accounts() {
+  contactsSetup();
   const buckets = ["within 90 days", "90 days - 1 year", "1-2 years", "over 2 years", "never logged in"], cls = ["current", "no current affiliation", "not in Entra", "not looked up"];
   table("#logins", [{ h: "Last sign-in", k: "b" }, ...cls.map(c => ({ h: c, n: 1, f: r => n(r[c] || 0) }))],
     buckets.map(b => { const o = { b }; D.logins.filter(v => v.bucket === b).forEach(v => o[v.classification] = v.accounts); return o; }));

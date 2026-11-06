@@ -102,6 +102,11 @@ def main():
         sup = read("SELECT UserEmail, ManagerEmail, LastSeen FROM HIST_Supervisors")
         account_netids = read("SELECT Username, NetID, LastSeen FROM HIST_AccountNetIDs") if db.exists(c, "HIST_AccountNetIDs") else None
         entra_names = read("SELECT Email, FirstName, LastName, DisplayName, LastSeen FROM HIST_PersonNames") if db.exists(c, "HIST_PersonNames") else None
+        # for the contacts list: each account's Entra groups, the current-affiliation groups' names, the directory's titles
+        entra_groups = read("SELECT Username, Groups FROM AGOL_EntraID_Status") if db.exists(c, "AGOL_EntraID_Status") else None
+        affil_groups = read('SELECT * FROM "Whitelisted_EntraID_Groups"') if db.exists(c, "Whitelisted_EntraID_Groups") else None
+        mqs = read("SELECT Username, title, tamuEduPersonDepartmentName AS directory_department, "
+                   "enrolledPrimaryMajor1CollegeName AS directory_college FROM AGOL_MQS_Status") if db.exists(c, "AGOL_MQS_Status") else None
 
     now = pd.Timestamp(as_of)
     # Items in the AGOL recycle bin are left out of every total, and shown on their own (Dan, 21 October 2026):
@@ -592,6 +597,45 @@ def main():
                 "runs": runs.astype(str).to_dict("records"), "scopes": scopes(named), "review": review(named), "degree_names": degree_names, "degree_notes": unconfirmed,
                 "placement": {f"{u}\u0001{s}": list(place(u, s)) for u, s in set(zip(snap_unit, snap_sub)) | set(zip(items["item_unit"], items["item_sub"])) if s}, "people": people(named)}
 
+    def contacts():
+        """One row per current person (several accounts are one row), for a message to everyone who uses ArcGIS Online
+        (Dan, 5 November 2026: quota changes, imported into the department's CRM). Affiliation comes from the Entra
+        current-affiliation groups (the directory returns none), titles and colleges from the directory."""
+        kinds = []   # (group id, kind) from the groups' names
+        if affil_groups is not None:
+            name_col = next(c_ for c_ in affil_groups.columns if "name" in c_.lower())
+            for gname, gid in zip(affil_groups[name_col], affil_groups["ID"]):
+                low = str(gname).lower()
+                kind = next((k_ for k_, w_ in (("faculty", "faculty"), ("student worker", "studentworker"), ("instructor", "instructor"),
+                                               ("staff", "staff"), ("student", "student"), ("employee", "employee")) if w_ in low), "")
+                if kind:
+                    kinds.append((str(gid).strip().lower(), kind))
+        kind_of = dict(kinds)
+        groups_of = {} if entra_groups is None else {str(u).strip().lower(): {g.strip().lower() for g in str(gs or "").split(",") if g.strip()}
+                                                   for u, gs in zip(entra_groups["Username"], entra_groups["Groups"])}
+        directory = {} if mqs is None else {str(r_.Username).strip().lower(): r_ for r_ in mqs.itertuples(index=False)}
+        order = ["faculty", "staff", "instructor", "student", "student worker", "employee"]
+        email_of = dict(zip(members["key"], members["Email"]))
+        cur = snap[snap["classification"] == "current"].copy()
+        cur["pkey"] = [p_ if isinstance(p_, str) and p_ else norm(k_) for p_, k_ in zip(cur["person"], cur["key"])]
+        rows = []
+        for pkey, g in cur.groupby("pkey"):
+            g = g.sort_values("feature_gb", ascending=False)
+            found = {kind_of[x] for k_ in g["key"] for x in groups_of.get(k_, ()) if x in kind_of}
+            allk = [k_ for k_ in order if k_ in found]
+            d = next((directory[k_] for k_ in g["key"] if k_ in directory and (directory[k_].title or directory[k_].directory_college)), None)
+            sub = next((s_ for s_ in g["sub_unit"] if isinstance(s_, str) and s_), "")
+            email = pkey if "@" in pkey else next((str(email_of.get(k_) or "") for k_ in g["key"] if email_of.get(k_)), "")
+            logins = [v_ for v_ in g["last_login"] if not pd.isna(v_)]
+            rows.append({"name": person_names.get(pkey) or person_names.get(norm(g["key"].iloc[0]), ""), "email": email,
+                         "affiliation": allk[0] if allk else "", "all_affiliations": "; ".join(allk),
+                         "title": (d.title or "") if d is not None else "", "department_or_major": sub, "unit": g["unit"].iloc[0] or "",
+                         "college": (d.directory_college or "") if d is not None else "",
+                         "accounts": "; ".join(g["username"]), "account_count": len(g), "items": int(g["items"].sum()),
+                         "feature_gb": r(g["feature_gb"].sum(), 3), "file_gb": r(g["file_gb"].sum(), 3),
+                         "last_sign_in": date_str(max(logins)) if logins else ""})
+        return pd.DataFrame(rows)
+
     def write_site_tables(acct, acct_items, names, logins, person_of_multi, counts, group_list, views, scopes_):
         """What the website's API reads, written to the database each run (replacing the last run's) and copied to
         the site's read-only copy by tools/publish_serving_db.py: every account's page (/api/v1/account/<name>),
@@ -613,6 +657,8 @@ def main():
                                              columns=["edition", "key", "data"]),
                   # every layer outside the recycle bin, with its dates and its owner's tier, for selecting layers for
                   # deletion by period (Proposed removals; Dan, 22 October 2026). Full edition only.
+                  # current people, one row each, for a message to everyone who uses ArcGIS Online (full edition only)
+                  "DASH_Contact": contacts(),
                   "DASH_Item": items.assign(tier=items["rgroup"])[["item_id", "title", "item_type", "key", "owner", "created", "modified",
                                                                     "last_viewed", "feature_gb", "file_gb", "share", "tier"]]}
         with db.connect() as c:

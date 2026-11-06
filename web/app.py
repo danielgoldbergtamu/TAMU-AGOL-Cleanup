@@ -35,7 +35,7 @@ import duckdb
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, Response, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -205,6 +205,31 @@ def serving_db():
                 except OSError:
                     pass
         return _db["con"].cursor()
+
+
+@app.get("/api/v1/contacts")
+def contacts_data(request: Request, affiliations: str = "", owners: bool = False, format: str = "json"):
+    """Current people, one row each, for a message to ArcGIS Online users (full edition only): a summary, or with
+    format=csv the list as a file. affiliations is a list separated by "|". Read-only."""
+    require_user(request)
+    cur = serving_db()
+    try:
+        data = queries.contacts(cur, True, [a for a in affiliations.split("|") if a], owners)
+    finally:
+        cur.close()
+    if data is None:
+        raise HTTPException(status_code=404)
+    if format != "csv":
+        return JSONResponse({"summary": data["summary"], "count": len(data["rows"])}, headers={"Cache-Control": "no-store"})
+    import csv
+    import io
+    buf = io.StringIO()
+    out = csv.writer(buf)
+    out.writerow(data["columns"])
+    out.writerows(data["rows"])
+    name = f"AGOL-contacts_{time.strftime('%Y%m%d-%H%M')}.csv"
+    return Response(buf.getvalue().encode("utf-8-sig"), media_type="text/csv",   # utf-8-sig: Excel reads accents right
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
 
 
 @app.get("/api/v1/search")
