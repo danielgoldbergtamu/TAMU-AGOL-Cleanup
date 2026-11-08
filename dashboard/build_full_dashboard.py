@@ -90,7 +90,7 @@ def main():
                      '"# of Groups shared with" AS "groups_n", "Date Created" AS "created", "Date Modified" AS "modified", "Date Last Viewed" AS "last_viewed", "View Counts" AS "views", '
                      'COALESCE("Feature Storage Size",0)/1024.0 AS "feature_gb", COALESCE("File Storage Size",0)/1024.0 AS "file_gb", '
                      f'"In Recycle Bin" AS "in_bin" FROM {db.q(items_table)} ORDER BY "Item ID"')
-        members = read('SELECT Username, Name, Email, "Login Type" AS "login", "Last Login Date" AS "last_login", "User Type" AS "user_type", '
+        members = read('SELECT Username, Name, Email, "Login Type" AS "login", "Last Login Date" AS "last_login", "Date Created" AS "joined", "User Type" AS "user_type", '
                        f'"# of Groups Owned" AS "groups_owned" FROM {db.q(members_table)} ORDER BY Username')
         changes = read("SELECT * FROM STATUS_CHANGES WHERE changed_by = ? ORDER BY username", as_of)
         for col in ("prev_projected_status", "projected_status"):   # whole numbers, blank when missing
@@ -102,6 +102,8 @@ def main():
         sup = read("SELECT UserEmail, ManagerEmail, LastSeen FROM HIST_Supervisors")
         account_netids = read("SELECT Username, NetID, LastSeen FROM HIST_AccountNetIDs") if db.exists(c, "HIST_AccountNetIDs") else None
         entra_names = read("SELECT Email, FirstName, LastName, DisplayName, LastSeen FROM HIST_PersonNames") if db.exists(c, "HIST_PersonNames") else None
+        # the Entra lookups taken in (pipeline_daily.entra_lookup): "<file> at <when>", for the date of the newest
+        entra_taken = read("SELECT value FROM _meta WHERE key LIKE 'entra_ingested:%'") if db.exists(c, "_meta") else None
         # for the contacts list: each account's Entra groups, the current-affiliation groups' names, the directory's titles
         entra_groups = read("SELECT Username, Groups FROM AGOL_EntraID_Status") if db.exists(c, "AGOL_EntraID_Status") else None
         affil_groups = read('SELECT * FROM "Whitelisted_EntraID_Groups"') if db.exists(c, "Whitelisted_EntraID_Groups") else None
@@ -182,6 +184,16 @@ def main():
                 "current_people": sum(1 for x in rows if x["current"]), "current_accounts": current_counts(multi)}
 
     contact = dict(zip(members["key"], members["Email"].fillna("")))
+    joined_on = dict(zip(members["key"], members["joined"]))
+
+    def entra_lookup_date():
+        """The date of the newest Entra lookup taken in: the date in its file name (AGOL_EntraID_Status_YYYYMMDD.csv),
+        else the day it was taken in. "Not looked up" accounts joined after it (Dan, 8 November 2026)."""
+        if entra_taken is None or not len(entra_taken):
+            return ""
+        newest = max(entra_taken["value"], key=lambda v: v.rsplit(" at ", 1)[-1])
+        m = re.search(r"(\d{4})(\d{2})(\d{2})", os.path.basename(newest.rsplit(" at ", 1)[0]))
+        return f"{m[1]}-{m[2]}-{m[3]}" if m else newest.rsplit(" at ", 1)[-1][:10]
     by_owner = {k: g for k, g in items.sort_values("feature_gb", ascending=False).groupby("key")}
 
     def account_pages(keys, max_items=250):
@@ -193,6 +205,7 @@ def main():
             acct[k] = {"user": a["username"], "email": contact.get(k, ""), "login": a["login_type"], "role": a["role"],
                        "classification": a["classification"], "unit": a["unit"], "sub_unit": a["sub_unit"] if isinstance(a["sub_unit"], str) else "",
                        "person": a["person"] if isinstance(a["person"], str) else "", "last_login": date_str(a["last_login"]),
+                       "joined": date_str(joined_on.get(k)),
                        "groups_owned": int(pd.to_numeric(a["groups_owned"], errors="coerce") or 0), "items": int(a["items"]),
                        "feature_gb": r(a["feature_gb"], 3), "file_gb": r(a["file_gb"], 3),
                        "status": status_label.get(a["delete_status"], "none yet"), "projected": status_label.get(a["projected_status"], "not assessed"),
@@ -586,7 +599,7 @@ def main():
                 s_ = latest_sup.get(norm(c_["username"].strip().lower()))
                 c_["supervisor"] = s_ if isinstance(s_, str) else ""
         return {"edition": "full" if named else "published", "as_of": str(as_of), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "sources": f"{members_table}, {items_table}, snapshot {snap['run_id'].iloc[0]}",
+                "sources": f"{members_table}, {items_table}, snapshot {snap['run_id'].iloc[0]}", "entra_lookup": entra_lookup_date(),
                 "limits": {"feature_gb": FEATURE_LIMIT_GB, "accounts": ACCOUNT_LIMIT}, "total": total, "current_accounts": current_accounts, "recycle_bin": recycle_bin(named), "trend": trend,
                 "classes": classes, "removal": removal, "units": units, "unit_trend": unit_trend, "item_types": item_types,
                 "viewed": viewed, "logins": logins, "roles": roles, "login_types": logintypes, "top_items": ti, "top_users": tu,

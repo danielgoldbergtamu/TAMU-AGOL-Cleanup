@@ -152,10 +152,13 @@ def lookups(con, ids):
     # each person's unit and department or major, shown under their name everywhere (Dan, 22 October 2026); for an
     # id with several accounts, the one that has a department wins
     places = {}
-    for k, unit, sub, login in con.execute("SELECT key, unit, sub_unit, last_login FROM DASH_Account").fetchall():
+    # and the date the account joined, shown for accounts that joined after the last Entra lookup (8 November 2026;
+    # a database built before then has no column for it)
+    joined = "joined" if "joined" in {r_[0] for r_ in con.execute("DESCRIBE DASH_Account").fetchall()} else "''"
+    for k, unit, sub, login, since in con.execute(f"SELECT key, unit, sub_unit, last_login, {joined} FROM DASH_Account").fetchall():
         k = norm(k)
         if k in ids and (k not in places or (sub and not places[k][1])):
-            places[k] = [unit or "", sub or "", login or ""]   # and the last sign-in (Dan, 22 October 2026)
+            places[k] = [unit or "", sub or "", login or "", since or ""]   # and the last sign-in (Dan, 22 October 2026)
     return {"names": pick("DASH_Names", "name"), "accounts": pick("DASH_ArcgisLogins", "email"),
             "person_of": {k: p for k, (p, _) in person_of.items()}, "person_n": {p: n for p, n in person_of.values()},
             "places": places}

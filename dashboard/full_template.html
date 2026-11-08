@@ -357,17 +357,28 @@ const DEFS = {
   "current": "Owner status: found in Entra and in a current-affiliation group (enrolled student, employee, faculty, instructor or student worker).",
   "no current affiliation": "Owner status: found in Entra but in no current-affiliation group; typically a former student or alumnus whose NetID still exists.",
   "not in Entra": "Owner status: no Entra account found. The person has left, or the AGOL account is not tied to a NetID (an ArcGIS login with an outside email).",
-  "not looked up": "Owner status: no Entra lookup for this account yet (created after this run's lookup).",
+  "not looked up": "Owner status: the account joined after the newest Entra lookup, so it has no Entra status yet. It gets one at the next lookup (every Monday, or on request).",
   "unknown": "Owner status: the owner is not in this run's member report.",
   "kept": "Projected status 0: current, or has an override. Nothing happens to the account.",
   "flagged": "Projected status 1: no longer current. Starts a 30-day notice period for the owner and their supervisor.",
   "listed for removal": "Projected status 2: flagged 30+ days, or owns nothing. Removed only after the maintainer approves the set, and content only after a verified backup.",
   "not assessed": "Projected status: a new account with no delete status yet; assessed on the next real run." };
-const pill = s => `<span class="pill ${slug(s)}"${DEFS[s] ? ` title="${esc(DEFS[s])}"` : ""}>${esc(s)}</span>`;
+// the words a label is shown as, where they differ from the stored value (Dan, 8 November 2026: "not looked up"
+// read as a failed lookup; those accounts are new)
+const SHOWN = { "not looked up": "joined after the last lookup" };
+const pill = s => `<span class="pill ${slug(s)}"${DEFS[s] ? ` title="${esc(DEFS[s])}"` : ""}>${esc(SHOWN[s] || s)}</span>`;
+// an account's owner status; for one that joined after the last Entra lookup, when it joined and when that lookup was
+const clsPill = (cls, id, joined) => {
+  if (cls !== "not looked up") return pill(cls);
+  const pl = id ? (D.places || {})[String(id).trim().toLowerCase().replace(/(@[^@\s]+?)_[a-z0-9]+$/, "$1")] : null;
+  const when = joined || (pl && pl[3]) || "";
+  const note = [when && `joined ${when}`, D.entra_lookup && `lookup of ${D.entra_lookup}`].filter(Boolean).join(", ");
+  return pill(cls) + (note ? `<br><span class="muted small">${esc(note)}</span>` : "");
+};
 function keyBox() {
   const row = k => `<dt>${pill(k)}</dt><dd>${esc(DEFS[k].replace(/^(Owner status|Projected status( \d)?): /, ""))}</dd>`;
   return `<details class="keybox"><summary>Key: what the labels mean</summary><div class="keycols">
-    <div><h4>Owner status (Entra, this run)</h4><dl>${["current", "no current affiliation", "not in Entra", "not looked up"].map(row).join("")}</dl></div>
+    <div><h4>Owner status (Entra, this run${D.entra_lookup ? `: lookup of ${esc(D.entra_lookup)}` : ""})</h4><dl>${["current", "no current affiliation", "not in Entra", "not looked up"].map(row).join("")}</dl></div>
     <div><h4>Projected delete status (this run's dry run)</h4><dl>${["kept", "flagged", "listed for removal", "not assessed"].map(row).join("")}</dl></div></div></details>`;
 }
 const NOT_UNITS = new Set(["Unit unknown", "Unmapped departments", "No unit recorded"]);
@@ -383,7 +394,7 @@ function sortValue(c, r) {
 }
 /* A column whose every value is a status label (a pill) gets a row of pill buttons above the table, in tables of
    more than 10 rows: All, or one label, each with its count (Dan, 22 October 2026). Filters and sorting combine. */
-const PILL_RE = /^<span class="pill[^"]*"[^>]*>([^<]*)<\/span>$/;
+const PILL_RE = /^<span class="pill[^"]*"[^>]*>([^<]*)<\/span>(?:<br><span class="muted small">[^<]*<\/span>)?$/;
 const unesc = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 function pillOf(c, r) { const m = c.f ? PILL_RE.exec(String(c.f(r)).trim()) : null; return m ? unesc(m[1]) : null; }
 function filterable(cols, rows) {
@@ -585,7 +596,7 @@ function renderScope(sc) {
     ...(isUnit ? [{ h: "Department or major", f: r => r.sub_unit ? subLink(sc.unit, r.sub_unit) : "", w: 1 }] : []),
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_items);
-  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Classification", f: r => pill(r.classification) },
+  table("#uv-users", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Classification", f: r => clsPill(r.classification, r.user) },
     { h: "Department or major", k: "sub_unit", w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], sc.top_users);
   table("#uv-classes", [{ h: "Classification", f: r => pill(r.classification) }, { h: "Members", n: 1, f: r => n(r.members) }], sc.classes);
@@ -616,7 +627,7 @@ async function review() {
   table("#rv-by", [{ h: "Breakdown", k: "k", w: 1 }, { h: "Accounts", n: 1, f: r => n(r.a) }], by);
   if (!R.empty_list.length) { $("#rv-list-block").innerHTML = '<p class="note">The list of accounts names people, so it appears only in the full edition on the maintainer\'s machine.</p>'; return; }
   const cols = [{ h: "Account", f: r => who(r.user, "", true, false), w: 1, sort: "user" }, { h: "In group 1", f: r => r.in_group_1 ? "yes" : "no", sort: "in_group_1" },
-    { h: "Projected status", f: r => pill(r.projected), sort: "projected" }, { h: "Classification", f: r => pill(r.classification), sort: "classification" }, { h: "Login", k: "login_type", sort: "login_type" },
+    { h: "Projected status", f: r => pill(r.projected), sort: "projected" }, { h: "Classification", f: r => clsPill(r.classification, r.user), sort: "classification" }, { h: "Login", k: "login_type", sort: "login_type" },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>', sort: "last_login" }, { h: "Groups owned", n: 1, f: r => n(r.groups_owned), sort: "groups_owned" },
     { h: "Unit", f: r => unitLink(r.unit), w: 1, sort: "unit" }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1, sort: "supervisor" }, { h: "Cautions", k: "cautions", w: 1, sort: "cautions" }];
   const filter = () => { const f = $("#rv-filter").value, q = $("#rv-q").value.toLowerCase();
@@ -932,7 +943,7 @@ function tops() {
     { h: "Owner status", f: r => pill(r.owner_class) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => r.sub_unit ? subLink(r.unit, r.sub_unit) : "", w: 1 },
     { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Sharing", k: "share" }, { h: "Groups", n: 1, k: "groups" }, { h: "Last viewed", f: r => r.last_viewed || '<span class="muted">never</span>' }, { h: "Owner's projected status", f: r => pill(r.projected) }, { h: "Owner's supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_items);
-  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
+  table("#topusers", [{ h: "#", n: 1, k: "rank" }, { h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Classification", f: r => clsPill(r.classification, r.user) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 },
     { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 }, { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], D.top_users);
 }
@@ -1001,8 +1012,8 @@ async function changes() {
   $("#changelist-card").hidden = !named || !list.length;
   if (named && list.length) {
     $("#changelist-card").innerHTML = '<h3>Accounts that changed (largest 300 by storage now)</h3><div class="tw" id="changelist"></div>';
-    const st = (s, k) => s ? (k === "unit" ? unitLink(s.unit) : pill(s[k])) : '<span class="muted">not a member</span>';
-    table("#changelist", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Last sign-in", f: r => signInCell(r.user) }, { h: "Was", f: r => st(r.s1, "cls") }, { h: "Now", f: r => st(r.s2, "cls") },
+    const st = (s, k, u) => s ? (k === "unit" ? unitLink(s.unit) : k === "cls" ? clsPill(s.cls, u) : pill(s[k])) : '<span class="muted">not a member</span>';
+    table("#changelist", [{ h: "Account", f: r => who(r.user), w: 1 }, { h: "Last sign-in", f: r => signInCell(r.user) }, { h: "Was", f: r => st(r.s1, "cls", r.user) }, { h: "Now", f: r => st(r.s2, "cls", r.user) },
       { h: "Unit was", f: r => st(r.s1, "unit"), w: 1 }, { h: "Unit now", f: r => st(r.s2, "unit"), w: 1 },
       { h: "Status was", f: r => st(r.s1, "proj") }, { h: "Status now", f: r => st(r.s2, "proj") },
       { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }],
@@ -1042,7 +1053,7 @@ async function contactsSetup() {
 function accounts() {
   contactsSetup();
   const buckets = ["within 90 days", "90 days - 1 year", "1-2 years", "over 2 years", "never logged in"], cls = ["current", "no current affiliation", "not in Entra", "not looked up"];
-  table("#logins", [{ h: "Last sign-in", k: "b" }, ...cls.map(c => ({ h: c, n: 1, f: r => n(r[c] || 0) }))],
+  table("#logins", [{ h: "Last sign-in", k: "b" }, ...cls.map(c => ({ h: SHOWN[c] || c, n: 1, f: r => n(r[c] || 0) }))],
     buckets.map(b => { const o = { b }; D.logins.filter(v => v.bucket === b).forEach(v => o[v.classification] = v.accounts); return o; }));
   table("#roles", [{ h: "Role or login type", k: "k", w: 1 }, { h: "Accounts", n: 1, f: r => n(r.accounts) }],
     [...D.roles.map(r => ({ k: "Role: " + r.role, accounts: r.accounts })), ...D.login_types.map(r => ({ k: "Login: " + r.login_type, accounts: r.accounts }))].sort((a, b) => b.accounts - a.accounts));
@@ -1063,7 +1074,8 @@ async function renderAccount(key) {
   $("#av-tiles").innerHTML = [["Items", n(a.items), ""], ["Feature storage", gb(a.feature_gb), ""], ["File storage", gb(a.file_gb), ""], ["Groups owned", n(a.groups_owned), ""]]
     .map(([k, v, s]) => `<div class="tile"><div class="l">${k}</div><div class="v">${v}</div><div class="n">${s}</div></div>`).join("");
   const rows = [["Account", esc(a.user)], ["Email on the account", esc(a.email)], ["Belongs to (NetID)", (a.person ? esc(a.person) : '<span class="muted">not tied to a NetID</span>') + (a.linked ? `<br><span class="muted small">${esc(a.linked)}</span>` : "")],
-    ["Login", a.login === "arcgis" ? "ArcGIS login" : "NetID (single sign-on)"], ["Role", esc(a.role)], ["Owner status (Entra)", pill(a.classification)],
+    ["Login", a.login === "arcgis" ? "ArcGIS login" : "NetID (single sign-on)"], ["Role", esc(a.role)], ["Owner status (Entra)", clsPill(a.classification, null, a.joined)],
+    ...(a.joined ? [["Joined ArcGIS Online", esc(a.joined)]] : []),
     ["Unit", unitLink(a.unit)], ["Department or major", a.sub_unit ? subLink(a.unit, a.sub_unit) : '<span class="muted">not recorded</span>'],
     ["Supervisor", who(a.supervisor, "none on record")], ["Last sign-in", a.last_login || '<span class="muted">never</span>'],
     ["Delete status now", esc(a.status) + (a.protected ? `<br><b>Protected:</b> ${esc(a.protected)}` : "")], ["Projected status (this run's dry run)", pill(a.projected)], ["Removal group", esc(a.group)]];
@@ -1123,7 +1135,7 @@ async function renderGroup(label) {
     .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
   rows.sort((a, b) => b.feature_gb - a.feature_gb || b.items - a.items);
   table("#gv-table", [{ h: "Account", f: r => who(r.user, "", false, false), w: 1 }, { h: "Login", f: r => r.login === "arcgis" ? "ArcGIS login" : "NetID" },
-    { h: "Classification", f: r => pill(r.classification) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 },
+    { h: "Classification", f: r => clsPill(r.classification, r.user) }, { h: "Unit", f: r => unitLink(r.unit), w: 1 }, { h: "Department or major", f: r => subLink(r.unit, r.sub_unit), w: 1 },
     { h: "Items", n: 1, f: r => n(r.items) }, { h: "Feature", n: 1, f: r => gb(r.feature_gb) }, { h: "File", n: 1, f: r => gb(r.file_gb) },
     { h: "Last sign-in", f: r => r.last_login || '<span class="muted">never</span>' }, { h: "Projected status", f: r => pill(r.projected) },
     { h: "Supervisor", f: r => who(r.supervisor, "none on record"), w: 1 }], rows);
