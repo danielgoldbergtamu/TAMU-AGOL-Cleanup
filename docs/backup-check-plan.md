@@ -1,6 +1,6 @@
 # Checking the Lifeboat backup before anything is deleted
 
-Plan of 8 November 2026. The Lifeboat (the on-premises ArcGIS Enterprise portal that holds the backup;
+Plan of 8 November 2026. **Pilot: items created 2010 to 2013**, the years restored to the Lifeboat first. The Lifeboat (the on-premises ArcGIS Enterprise portal that holds the backup;
 its address is in the private configuration) now has backups made year by year. Before any layer is
 deleted from ArcGIS Online, each one has to be shown to be in the Lifeboat, complete. This plan says how
 that is checked, how the result is recorded, and how the delete step is made to depend on it.
@@ -136,6 +136,22 @@ time or by owner. For each layer it shows:
 - **the backup check**: pass or fail, by test, with links to both copies;
 - **things a delete would break or lose** (below), as warnings.
 
+Also weighed, as warnings (decided 8 November 2026):
+
+- use a dependency map cannot see: public layers that may be embedded or called by URL elsewhere, and edits to
+  the data by other people (the data's last edit date, not the item's). **Last viewed and view counts are not
+  used**: nearly every layer is read daily by bots, so they say nothing about use;
+- field and mobile use: Survey123 forms, Field Maps and offline areas, QuickCapture and Workforce projects, sync
+  replicas;
+- owner and organization intent: delete protection, authoritative or deprecated status, and organization settings
+  that point at the item (basemap gallery, templates, home page, featured content);
+- groups: shown with how many members are current. **A layer none of whose users (owner, group members) is
+  current is not in use by anyone**, a course's instructor included; no separate course-group rule;
+- research data, records retention and legal holds are not checked by the site: users have been told not to keep
+  research data in ArcGIS Online;
+- transfer instead of delete is not a separate step: when a supervisor is known, they are notified before the
+  delete, as already planned (the 30-day notice).
+
 The choices made on the page are a proposal; the CSV it produces is reviewed and approved by the maintainer in
 writing before anything is deleted (`CLAUDE.md`, "Deleting").
 
@@ -146,4 +162,8 @@ writing before anything is deleted (`CLAUDE.md`, "Deleting").
 2. Comparison and records for that year (steps 5–6), and the site section (step 8).
 3. Spot check of that year (step 7). The first year is the pilot: the first deletion set proposed for
    review comes only from it.
+   **Restore test first** (decided 8 November 2026): one ArcGIS Online item from the pilot that looks completely
+   safe is proposed; once the maintainer approves deleting that one item in writing, it is deleted, and the
+   maintainer restores it from the Lifeboat to ArcGIS Online and checks it works. No other delete is proposed until
+   that restore has worked.
 4. The remaining years, then the delete gate (step 9) before any delete script exists.
