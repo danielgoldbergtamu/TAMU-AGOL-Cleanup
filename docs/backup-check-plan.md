@@ -111,6 +111,11 @@ items that use it in ArcGIS Online and whether those are backed up or kept.
   of 5,629); 2018 onward has barely started. The items of those years missing from the Lifeboat are the first
   thing to report.
 - 503 Lifeboat items match no current ArcGIS Online item: deleted since the backup, or made in the Lifeboat.
+- **Restored so far: items created 2010 to 2013** (the maintainer, 8 November 2026). Later years are being restored,
+  expected to finish the week of 9 November 2026; their items already in the Lifeboat are from restores still under
+  way. **A year counts as restored only when the maintainer says so**, recorded in a reviewed list in the private
+  configuration (`lifeboat_restored_years.csv`: year, restored_on, said_by); items of other years can be read
+  but are never offered for deletion. The backup is not run again, so each Lifeboat copy is read once and stored.
 
 ## Storage (decided 8 November 2026)
 
