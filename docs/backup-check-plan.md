@@ -100,6 +100,18 @@ items that use it in ArcGIS Online and whether those are backed up or kept.
 - **Access:** a view-only Lifeboat service account, its sign-in in `.env` (`LIFEBOAT_URL`, `LIFEBOAT_USERNAME`,
   `LIFEBOAT_PASSWORD`).
 
+## First look (8 November 2026)
+
+- The view-only Lifeboat account works: only view privileges, including the three "view all" ones (it needs a user
+  type above Viewer to hold them).
+- **Backup My Org keeps the original item ids.** Of the Lifeboat's 7,245 items, 6,742 have the id of an item
+  still in ArcGIS Online, and 6,725 of those have the same owner. Matching (rule 1) is by item id; the Lifeboat's
+  creation dates are the day of the restore, so the original dates come from ArcGIS Online.
+- **Backed up so far: items created 2010 to 2017**, each year 94% to 100% of its ArcGIS Online items (2017: 5,481
+  of 5,629); 2018 onward has barely started. The items of those years missing from the Lifeboat are the first
+  thing to report.
+- 503 Lifeboat items match no current ArcGIS Online item: deleted since the backup, or made in the Lifeboat.
+
 ## Order of work
 
 1. Read-only Lifeboat account and its check (step 1); inventory and match for one year (steps 2–4).
