@@ -112,6 +112,33 @@ items that use it in ArcGIS Online and whether those are backed up or kept.
   thing to report.
 - 503 Lifeboat items match no current ArcGIS Online item: deleted since the backup, or made in the Lifeboat.
 
+## Storage (decided 8 November 2026)
+
+The check keeps its own database on the maintainer's workstation (`data/lifeboat-check.duckdb`, never committed):
+the Lifeboat inventories, the dependency map and every check result, kept as history (the newest counts). Each
+result records what it was based on (the ArcGIS Online item's and the Lifeboat item's modified times, and the
+check's version), and an item is checked again only when one of them changes. The ArcGIS Online side comes from the
+daily job's inventory. After a check, the per-item results are exported and handed to the cluster through an inbox,
+like the Entra lookup; the daily job records them and the site shows them.
+
+## The review page (asked for 8 November 2026)
+
+A page of the full edition where the maintainer reviews proposed deletes and chooses which to do, one layer at a
+time or by owner. For each layer it shows:
+
+- **the layer**: type, size, created, modified, last viewed and views, sharing level, delete protection,
+  content status (authoritative, deprecated);
+- **its owner** and their status (Entra, delete status, protected), unit and supervisor;
+- **who else can use it**: each group it is shared with, the group's owner and members and their statuses
+  (how many are current), and whether the group is a course or unit group;
+- **what it depends on and what depends on it** (views, maps, apps, surveys, sites), with each one's owner,
+  status and whether it is kept;
+- **the backup check**: pass or fail, by test, with links to both copies;
+- **things a delete would break or lose** (below), as warnings.
+
+The choices made on the page are a proposal; the CSV it produces is reviewed and approved by the maintainer in
+writing before anything is deleted (`CLAUDE.md`, "Deleting").
+
 ## Order of work
 
 1. Read-only Lifeboat account and its check (step 1); inventory and match for one year (steps 2–4).
