@@ -90,6 +90,16 @@ items that use it in ArcGIS Online and whether those are backed up or kept.
 10. **After a delete,** the item stays in the ArcGIS Online recycle bin for its retention period; the
    next run confirms each deleted item is gone from ArcGIS Online and still present in the Lifeboat.
 
+## Decided (8 November 2026)
+
+- The backups were made with **GEO Jobe Backup My Org**. How it records the original item (same item id, a type
+  keyword, or neither) is read from the Lifeboat inventory in step 2, and decides the matching rule.
+- **Pilot: the oldest backed-up year.**
+- **Depth:** structure and counts on every item; checksums and feature samples on a sample.
+- **Runs on the maintainer's workstation first**, on the cluster later if it can reach the Lifeboat.
+- **Access:** a view-only Lifeboat service account, its sign-in in `.env` (`LIFEBOAT_URL`, `LIFEBOAT_USERNAME`,
+  `LIFEBOAT_PASSWORD`).
+
 ## Order of work
 
 1. Read-only Lifeboat account and its check (step 1); inventory and match for one year (steps 2–4).
