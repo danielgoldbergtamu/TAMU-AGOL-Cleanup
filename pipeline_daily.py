@@ -16,14 +16,17 @@ Steps, each its own process (DuckDB has one writer at a time; each step opens th
   6. snapshot          one row per member for this report date (dashboard/build_dashboard_data.py); a rerun on the
                        same date adds another, and the newest is the one shown
   7. dashboards        both editions' data, into the database (DASH_* tables) (dashboard/build_full_dashboard.py)
-  8. publish-db        the website's read-only copy of the tables it reads (tools/publish_serving_db.py)
+  8. publish-db        the website's read-only copy of the tables it reads (tools/publish_serving_db.py); before it,
+                       the Lifeboat check's results left in the Lifeboat inbox (AGOL_LIFEBOAT_INBOX, default
+                       data/lifeboat-inbox; tools/lifeboat_export.py on the workstation) are added, for the review page
 
 Nothing here changes or removes anything in ArcGIS Online, and it never saves a delete status: removals stay a
 separate, manual step after the maintainer's written approval (CLAUDE.md, "Deleting").
 
 Usage:
     python pipeline_daily.py [--skip-groups] [--members-csv F --items-csv F] [--mqs-csv F]   (files: for tests)
-    python pipeline_daily.py --dashboards-only    only steps 7 and 8, from what the database already holds
+    python pipeline_daily.py --dashboards-only    only steps 7 and 8, from what the database already holds (and
+                                                  the Lifeboat inbox)
 """
 import argparse
 import datetime
@@ -83,6 +86,50 @@ def entra_lookup(run):
     return path
 
 
+# what each table's rows are told apart by: a row the database already has is never written again or replaced
+LIFEBOAT_KEYS = {"LIFEBOAT_Check": ["run_id", "item_id"], "AGOL_Group": ["run_id", "group_id"], "LIFEBOAT_Runs": ["run_id"],
+                 "LIFEBOAT_RestoredYears": ["exported_at", "year"]}
+
+
+def lifeboat_results(run):
+    """The Lifeboat check's results (8 November 2026): each file in the inbox is taken once, and only the rows the
+    database does not have yet are added. Nothing is replaced or deleted, so the history of every check is kept.
+    The check itself runs on the workstation (tools/lifeboat_check.py), which can reach the Lifeboat."""
+    inbox = os.environ.get("AGOL_LIFEBOAT_INBOX") or os.path.join(SCRIPT_DIR, "data", "lifeboat-inbox")
+    found = sorted(glob.glob(os.path.join(inbox, "*.duckdb")), key=os.path.getmtime)
+    taken = []
+    for path in found:
+        digest = hashlib.sha256(open(path, "rb").read()).hexdigest()[:16]
+        with db.connect() as con:
+            con.execute("CREATE TABLE IF NOT EXISTS _meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
+            if con.execute("SELECT 1 FROM _meta WHERE key = ?", [f"lifeboat_ingested:{digest}"]).fetchone():
+                continue
+            con.execute(f"ATTACH '{path.replace(chr(39), chr(39) * 2)}' AS lb (READ_ONLY)")
+            added = {}
+            try:
+                for t, keys in LIFEBOAT_KEYS.items():
+                    if not con.execute("SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = 'lb' AND table_name = ?", [t]).fetchone()[0]:
+                        continue
+                    # not db.exists: with the inbox file attached, that finds its table as well
+                    if not con.execute("SELECT COUNT(*) FROM duckdb_tables() WHERE database_name = current_database() AND table_name = ?", [t]).fetchone()[0]:
+                        con.execute(f"CREATE TABLE {db.q(t)} AS SELECT * FROM lb.{db.q(t)} LIMIT 0")
+                    have = {c for (c,) in con.execute(f"SELECT column_name FROM duckdb_columns() WHERE database_name = current_database() AND table_name = ?", [t]).fetchall()}
+                    for c, typ in con.execute("SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = 'lb' AND table_name = ?", [t]).fetchall():
+                        if c not in have:   # a column a newer check added
+                            con.execute(f"ALTER TABLE {db.q(t)} ADD COLUMN {db.q(c)} {typ}")
+                    on = " AND ".join(f"o.{db.q(k)} IS NOT DISTINCT FROM n.{db.q(k)}" for k in keys)
+                    before = con.execute(f"SELECT COUNT(*) FROM {db.q(t)}").fetchone()[0]
+                    con.execute(f"INSERT INTO {db.q(t)} BY NAME SELECT n.* FROM lb.{db.q(t)} n WHERE NOT EXISTS (SELECT 1 FROM {db.q(t)} o WHERE {on})")
+                    added[t] = con.execute(f"SELECT COUNT(*) FROM {db.q(t)}").fetchone()[0] - before
+            finally:
+                con.execute("DETACH lb")
+            con.execute("INSERT OR REPLACE INTO _meta VALUES (?, ?)", [f"lifeboat_ingested:{digest}", f"{path} at {datetime.datetime.now():%Y-%m-%d %H:%M}"])
+        print(f"Lifeboat check results from {os.path.basename(path)}: added {added}")
+        taken.append(os.path.basename(path))
+    run.note(lifeboat_results=taken)
+    return taken
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--skip-groups", action="store_true", help="use the newest group inventory instead of a new one")
@@ -126,6 +173,7 @@ def main():
                               "--removal-summary", os.path.join(removal, "removal_summary.csv")], run)
             step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", os.path.join(removal, "removal_summary.csv"),
                                 "--groups", groups], run)
+            lifeboat_results(run)
             step("publish-db", ["tools/publish_serving_db.py"], run)
 
             status = {"run_id": run.run_id, "started": started.isoformat(timespec="seconds"),
@@ -166,6 +214,7 @@ def rebuild_dashboards():
             groups = os.path.dirname(newest(("**", "groups", "groups.csv")))
             removal = newest(("**", "removal", "removal_summary.csv"))
             step("dashboards", ["dashboard/build_full_dashboard.py", "--removal-summary", removal, "--groups", groups], run)
+            lifeboat_results(run)
             step("publish-db", ["tools/publish_serving_db.py"], run)
             run.note(groups=groups, removal_summary=removal)
             print(f"dashboards rebuilt in {(datetime.datetime.now() - started).seconds // 60} min, from {groups} and {removal}")

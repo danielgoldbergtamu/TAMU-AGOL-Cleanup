@@ -126,6 +126,27 @@ check's version), and an item is checked again only when one of them changes. Th
 daily job's inventory. After a check, the per-item results are exported and handed to the cluster through an inbox,
 like the Entra lookup; the daily job records them and the site shows them.
 
+**Built 9 November 2026.** On the workstation, `tools/lifeboat_check.py` checks a range of years and
+`tools/lifeboat_export.py` writes its results into one DuckDB file (every check row, the ArcGIS Online groups the
+items are shared with and their members, the runs, and the reviewed list of restored years).
+kubernetes-config's `16-send-lifeboat-check.ps1` does both steps and copies the file into the cluster's Lifeboat
+inbox (`/data/lifeboat-inbox`). The next daily or dashboards-only run adds the rows its database does not have yet
+(`pipeline_daily.lifeboat_results`; nothing is replaced), and the site's read-only copy carries them.
+
+## Pilot result: 2010 to 2013 (9 November 2026)
+
+106 ArcGIS Online items were created in those years. **100 passed every test.** A full check takes about
+2.5 minutes; the Lifeboat copies are read once and stored, so a later check reads only the ArcGIS Online side.
+
+Six failed, and are real backup problems: two items are not in the Lifeboat (a shapefile and an operation view);
+one feature service's copy has no layers, so the web map that uses it still points at ArcGIS Online; one app's copy
+is not shared with its group; one map package's file is a different size. **Decided (9 November 2026): those six are
+left out of any delete for now**, kept as they are, and the site shows them as "backup failed". They become
+candidates only if a later check passes.
+
+Of the 100 that passed, the review page counts 83 that nobody current can use (owner left; private, or shared only
+with groups that have no current member) and 17 still in use.
+
 ## The review page (asked for 8 November 2026)
 
 A page of the full edition where the maintainer reviews proposed deletes and chooses which to do, one layer at a
@@ -156,6 +177,14 @@ Also weighed, as warnings (decided 8 November 2026):
   research data in ArcGIS Online;
 - transfer instead of delete is not a separate step: when a supervisor is known, they are notified before the
   delete, as already planned (the 30-day notice).
+
+**Built 9 November 2026**: the Backup check page of the full edition (`#backup`; `queries.backup`). Each item has a
+standing: *backup failed* (never offered), *year not restored* (never offered), *in use* (the owner is current, it is
+shared with the organization or the public, or one of its groups has a current member), or *no current users*. Its
+details show the tests, what differs, the owner with status, supervisor and protection, each group with every
+member's status, what it uses, and what uses it. **"Used by" counts only the items checked so far**: a map made in
+a later year that uses a 2012 layer shows once that year is checked. Not there yet: organization settings that point
+at an item, and the data's last edit date.
 
 The choices made on the page are a proposal; the CSV it produces is reviewed and approved by the maintainer in
 writing before anything is deleted (`CLAUDE.md`, "Deleting").

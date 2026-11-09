@@ -6,7 +6,7 @@ FROM python:3.12-slim
 # Run dates and report dates are US Central, as on the workstation (times are recorded in US Central).
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     AGOL_DUCKDB=/data/agol.duckdb AGOL_REPORTS_DIR=/data/reports AGOL_OUTPUT_DIR=/data/out \
-    AGOL_ENTRA_INBOX=/data/entra-inbox AGOL_CONFIG_DIR=/config \
+    AGOL_ENTRA_INBOX=/data/entra-inbox AGOL_LIFEBOAT_INBOX=/data/lifeboat-inbox AGOL_CONFIG_DIR=/config \
     TZ=America/Chicago
 
 RUN apt-get update && apt-get install -y --no-install-recommends libkrb5-3 tzdata && rm -rf /var/lib/apt/lists/*

@@ -115,6 +115,12 @@ a.pill.fbtn.on { color: var(--current); border-color: currentColor; box-shadow: 
 .keybox h4 { margin: 4px 0 6px; font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); }
 .keybox dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 10px; margin: 0; } .keybox dd { margin: 0; color: var(--ink-2); }
 .pill[title] { cursor: help; }
+.pill.no-current-users { color: var(--ok); border-color: currentColor; }
+.pill.in-use, .pill.year-not-restored { color: var(--warn); border-color: currentColor; }
+.pill.backup-failed { color: var(--limit); border-color: currentColor; }
+.bk-ok { color: var(--ok); } .bk-bad { color: var(--limit); font-weight: 600; }
+.bk-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.bk-detail dt { color: var(--ink-2); } .bk-detail dd { margin: 0; overflow-wrap: anywhere; }
 .statuses { border: 1px solid var(--line); padding: 12px 14px; margin-bottom: 16px; }
 .statuses h3 { margin-top: 0; }
 .statuses dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 0; }
@@ -136,7 +142,7 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
   </div>
 </header>
 <nav aria-label="Sections">
-  <a href="#overview">Overview</a><a href="#removals">Proposed removals</a><a href="#review">Review</a><a href="#units">Colleges and departments</a>
+  <a href="#overview">Overview</a><a href="#removals">Proposed removals</a><a href="#backup">Backup check</a><a href="#review">Review</a><a href="#units">Colleges and departments</a>
   <a href="#items">Largest layers</a><a href="#users">Largest owners</a>
   <a href="#content">Content</a><a href="#accounts">Accounts</a><a href="#people">Multi-Account Holders</a><a href="#quality">Data quality</a><a href="#runs">Runs</a><a href="#changes">Changes</a>
 </nav>
@@ -205,6 +211,25 @@ h3 { font-size: .95rem; margin: 6px 0 8px; } .muted { color: var(--ink-3); } .no
       <button type="button" id="sel-csv" disabled>Download CSV of selected</button></div>
     <div id="sel-list"></div>
   </div>
+</section>
+
+<section class="panel stack" id="backup">
+  <div class="card"><h2>Backup check</h2>
+  <p class="lede">Each checked item's Lifeboat copy, and what a decision to delete it weighs: who owns it and their status, whom it is
+    shared with and whether any of them is current, what it uses and what uses it. <b>For review only.</b> Nothing is deleted until the
+    maintainer has reviewed a specific set and approved it in writing. Items whose backup failed, or from a year not yet restored to the
+    Lifeboat, are never offered.</p>
+  <div class="tiles" id="bk-tiles"></div><p class="note" id="bk-about"></p></div>
+  <div class="card" id="bk-key"><h3>What the standings mean</h3><dl>
+    <dt><span class="pill no-current-users">no current users</span></dt><dd>Backed up correctly, and nobody current can use it: the owner has left, it is private or shared only with groups that have no current member. Then nobody, an instructor included, is still using it.</dd>
+    <dt><span class="pill in-use">in use</span></dt><dd>Backed up correctly, but someone current can still use it: the owner is current, it is shared with the organization or the public, or one of its groups has a current member.</dd>
+    <dt><span class="pill year-not-restored">year not restored</span></dt><dd>Created in a year that is not on the reviewed list of years restored to the Lifeboat. Never offered for deletion.</dd>
+    <dt><span class="pill backup-failed">backup failed</span></dt><dd>A test of the Lifeboat copy failed: kept, and never offered for deletion until a new check passes.</dd></dl>
+    <p class="note">Not used, on purpose: <b>last viewed</b> (bots read almost every layer daily), research or records checks (users were told not to keep research data in ArcGIS Online), and ownership transfer (a known supervisor is told before any removal).</p></div>
+  <div class="card"><h3>Checked items</h3>
+    <div class="controls"><label for="bk-q">Search <input id="bk-q" type="search" placeholder="title, owner, type, group"></label><span>Showing <b id="bk-shown"></b></span></div>
+    <div class="tw tall" id="bk-list"></div></div>
+  <div class="card bk-detail" id="bk-detail" hidden></div>
 </section>
 
 <section class="panel stack" id="review">
@@ -636,8 +661,73 @@ async function review() {
   $("#rv-filter").onchange = filter; $("#rv-q").oninput = filter; filter();
 }
 
+/* The backup check (Dan, 8 November 2026): the Lifeboat check's results for each item (tools/lifeboat_check.py, on the
+   workstation, handed to the site), with its owner, sharing, groups and their members, and its dependencies. */
+const BK_TESTS = { found: "in the Lifeboat", type: "same type", owner: "same owner, who exists", sharing: "same sharing", groups: "same groups, members there",
+  structure: "same layers and fields", counts: "same feature and attachment counts", files: "same file size", dependencies: "what it uses is there",
+  usable: "first features read the same", unchanged: "not changed since the copy" };
+const BK = { data: null };
+const bkResult = r => r.passed ? '<span class="bk-ok">passed</span>'
+  : `<span class="bk-bad">failed:</span> ${esc(r.failed_tests.split(", ").map(t => BK_TESTS[t] || t).join("; "))}`;
+const BK_DIFF = { points_at_agol: "still points at ArcGIS Online", dependencies_missing: "uses items not in the Lifeboat", layers: "layers (ArcGIS Online, Lifeboat)" };
+const bkAccess = r => !r.access ? "not recorded" : r.access === "private" && r.groups.length ? "groups only" : r.access;
+const bkShare = r => `${esc(bkAccess(r))}${r.groups.length ? `<br><span class="muted small">${r.groups.length} group${r.groups.length > 1 ? "s" : ""}</span>` : ""}`;
+const bkUsers = r => r.current_users.length ? esc(r.current_users.join("; ")) : '<span class="muted">nobody current</span>';
+const bkItems = xs => xs.length ? xs.map(([id, t]) => itemLink(id, t || id)).join("<br>") : '<span class="muted">none</span>';
+async function backupView() {
+  if (BK.data) return;
+  const X = adopt(await apiData("backup"));
+  if (!X) { $("#bk-tiles").innerHTML = ""; $("#bk-about").innerHTML = viewStatus.backup === 404 || !SERVED
+      ? "The backup check names people and items, so it appears only in the full edition on the site, once its first results are handed over."
+      : "The backup check could not be loaded. Try reloading the page."; return; }
+  BK.data = X;
+  const I = X.items, c = s => I.filter(r => r.standing === s).length;
+  $("#bk-tiles").innerHTML = [["Items checked", n(I.length), `created ${[...new Set(I.map(r => r.year))].sort().join(", ")}`],
+    ["Backed up correctly", n(I.filter(r => r.passed).length), `of ${n(I.length)}`], ["Backup failed", n(c("backup failed")), "kept, never offered"],
+    ["No current users", n(c("no current users")), "backed up, nobody current can use them"], ["In use", n(c("in use")), "someone current can use them"]]
+    .map(([l, v, nn]) => `<div class="tile"><span class="l">${l}</span><span class="v">${v}</span><span class="n">${nn}</span></div>`).join("");
+  const yrs = Object.entries(X.restored_years || {});
+  $("#bk-about").innerHTML = (X.last_run ? `Last check ${esc(X.last_run.at.slice(0, 16))} (years ${esc(X.last_run.from_year)} to ${esc(X.last_run.to_year)}). ` : "")
+    + `Years restored to the Lifeboat (reviewed list): ${yrs.length ? yrs.map(([y, [o, w]]) => `<span title="${esc(o + "; " + w)}">${esc(y)}</span>`).join(", ") : "none yet"}.`;
+  const cols = [{ h: "Year", n: 1, k: "year" }, { h: "Item", f: r => `${itemLink(r.item_id, r.title)}<br><span class="muted small">${esc(r.item_type)}</span>`, w: 1 },
+    { h: "Owner", f: r => who(r.owner, "", true, true), w: 1 }, { h: "Owner status", f: r => clsPill(r.owner_status, r.owner) },
+    { h: "Who current can use it", f: bkUsers, w: 1 }, { h: "Shared with", f: bkShare },
+    { h: "Uses", n: 1, f: r => n(r.depends_on.length) }, { h: "Used by", n: 1, f: r => n(r.used_by.length) },
+    { h: "Backup", f: bkResult, w: 1 }, { h: "Warnings", f: r => esc(r.warnings.join("; ")), w: 1 },
+    { h: "Standing", f: r => pill(r.standing) }, { h: "", f: r => `<button type="button" class="pill fbtn" data-bk="${esc(r.item_id)}">details</button>` }];
+  const filter = () => { const q = $("#bk-q").value.toLowerCase();
+    const rows = I.filter(r => !q || [r.title, r.owner, r.item_type, r.standing, ...r.groups.map(g => g.title)].join(" ").toLowerCase().includes(q));
+    $("#bk-shown").textContent = n(rows.length); table("#bk-list", cols, rows); };
+  $("#bk-q").oninput = filter; filter();
+  $("#bk-list").addEventListener("click", e => { const id = e.target?.dataset?.bk; if (id) backupDetail(id); });
+}
+function backupDetail(id) {
+  const r = BK.data.items.find(x => x.item_id === id); if (!r) return;
+  const tests = Object.entries(r.tests).filter(([, v]) => v !== null)
+    .map(([t, v]) => `<tr><td>${esc(BK_TESTS[t] || t)}</td><td>${v ? '<span class="bk-ok">passed</span>' : '<span class="bk-bad">failed</span>'}</td></tr>`).join("");
+  const det = Object.entries(r.detail).filter(([k]) => k !== "layers" || !r.passed)
+    .map(([k, v]) => `<dt>${esc(BK_DIFF[k] || k.replace(/_/g, " "))}</dt><dd>${esc(typeof v === "string" ? v : JSON.stringify(v))}</dd>`).join("");
+  const groups = r.groups.map(g => `<h4>${esc(g.title)} <span class="muted small">owner ${who(g.owner)}, ${esc(g.access)}, ${n(g.members.length)} members, ${n(g.current)} current</span></h4>`
+    + (g.members.length ? `<div class="tw"><table><thead><tr><th>Member</th><th>Status</th></tr></thead><tbody>${g.members.map(([m, st]) => `<tr><td>${who(m, "", true, true)}</td><td>${clsPill(st, m)}</td></tr>`).join("")}</tbody></table></div>` : "")).join("");
+  const box = $("#bk-detail");
+  box.hidden = false;
+  box.innerHTML = `<h3>${itemLink(r.item_id, r.title)} ${pill(r.standing)}</h3>
+    <dl><dt>Type</dt><dd>${esc(r.item_type)}</dd><dt>Created, modified</dt><dd>${esc(r.created.slice(0, 10))}, ${esc(r.modified.slice(0, 10))}</dd>
+    <dt>Size</dt><dd>feature ${gb(r.size[0])}, file ${gb(r.size[1])}</dd>
+    <dt>Owner</dt><dd>${who(r.owner, "", true, true)} ${clsPill(r.owner_status, r.owner)}${r.owner_projected ? " " + pill(r.owner_projected) : ""}${r.owner_protected ? ` <b>protected:</b> ${esc(r.owner_protected)}` : ""}</dd>
+    <dt>Supervisor</dt><dd>${who(r.supervisor, "none on record")}</dd>
+    <dt>Sharing</dt><dd>${esc(bkAccess(r))}</dd><dt>Who current can use it</dt><dd>${bkUsers(r)}</dd>
+    <dt>Uses</dt><dd>${bkItems(r.depends_on)}</dd><dt>Used by</dt><dd>${bkItems(r.used_by)}<br><span class="muted small">among the checked items only, so far</span></dd>
+    <dt>Warnings</dt><dd>${r.warnings.length ? esc(r.warnings.join("; ")) : '<span class="muted">none</span>'}</dd>
+    <dt>Checked</dt><dd>${esc(r.checked_at.slice(0, 16))}</dd></dl>
+    <h4>Backup tests</h4><div class="tw"><table><tbody>${tests}</tbody></table></div>
+    ${det ? `<h4>What differs</h4><dl>${det}</dl>` : ""}
+    ${groups ? `<h4>Groups it is shared with</h4>${groups}` : ""}`;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 /* One view at a time: each section is its own page, chosen from the section bar or a link (#review, #u3, ...). */
-const REDRAW = { overview: () => overview(), removals: () => removals(), units: () => units(), content: () => content() };
+const REDRAW = { overview: () => overview(), removals: () => removals(), units: () => units(), content: () => content(), backup: () => backupView() };
 function route() {
   const h = decodeURIComponent(location.hash.slice(1)) || "overview";
   if (h.startsWith("chg:") && D.edition === "full") {

@@ -25,6 +25,8 @@ Results go to their own database (default data/lifeboat-check.duckdb, never comm
   LIFEBOAT_Copy      what was read from each Lifeboat copy (layers, counts, sample, sharing, references), read
                      once: the backup is not run again, so a copy is read again only if its modified time changes
   LIFEBOAT_Group     each Lifeboat group's members, read once
+  AGOL_Group         each ArcGIS Online group an item is shared with: title, owner, access, members; one row per
+                     group per run (the review page shows who can still use an item, from these)
   LIFEBOAT_Check     one row per item per check, written as each item is checked (a stopped run loses nothing);
                      the newest counts
   LIFEBOAT_Runs      one row per run, with the time each step took
@@ -54,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import agol_db as db  # noqa: E402
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-CHECK_VERSION = 5   # raise when a test changes, so every item is checked again
+CHECK_VERSION = 7   # raise when a test changes, so every item is checked again
 TESTS = ["found", "type", "owner", "sharing", "groups", "structure", "counts", "files", "dependencies", "usable", "unchanged"]
 FILE_TYPES = {"PDF", "Shapefile", "File Geodatabase", "CSV", "Microsoft Excel", "Microsoft Word", "Microsoft Powerpoint",
               "Image", "KML", "GeoJson", "Service Definition", "Mobile Map Package", "Map Package", "Layer Package",
@@ -279,7 +281,7 @@ def compare(a, l, a_groups, lb_group, lb_by_key, lb_items, lb_user, ours):
         d["dependencies_missing"] = missing
     if own_urls:
         d["points_at_agol"] = own_urls
-    d["depends_on"] = a["refs"]
+    d["depends_on"] = [i for i in a["refs"] if ours["item"](i)]   # this organization's items only
     t["unchanged"] = (a["modified"] or 0) <= (l["created"] or 0)
     if not t["unchanged"]:
         d["unchanged"] = f"modified in ArcGIS Online {ms_date(a['modified'])}, after the copy was made {ms_date(l['created'])}"
@@ -370,6 +372,8 @@ def main():
     if db.exists(con, "LIFEBOAT_Check"):   # the item's type was first stored under "type", the name of a test
         con.execute("ALTER TABLE LIFEBOAT_Check ADD COLUMN IF NOT EXISTS item_type VARCHAR")   # and its owner under "owner"
         con.execute("ALTER TABLE LIFEBOAT_Check ADD COLUMN IF NOT EXISTS item_owner VARCHAR")
+        con.execute("ALTER TABLE LIFEBOAT_Check ADD COLUMN IF NOT EXISTS access VARCHAR")      # version 6: sharing, for
+        con.execute("ALTER TABLE LIFEBOAT_Check ADD COLUMN IF NOT EXISTS group_ids VARCHAR")   # the review page ("groups" is a test)
     previous = {}
     if db.exists(con, "LIFEBOAT_Check") and not args.recheck:
         for r in con.execute("SELECT * FROM LIFEBOAT_Check QUALIFY ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY checked_at DESC) = 1").df().to_dict("records"):
@@ -386,13 +390,15 @@ def main():
             passed += bool(p["passed"])
             continue
         t0 = time.perf_counter()
+        af = {"access": None, "groups": []}
         try:
             af = item_facts(a)
             for gid in af["groups"]:
                 if gid not in a_groups:
                     try:
                         g = T("group members", agol.groups.get, gid)
-                        a_groups[gid] = {"title": g.title, "owner": g.owner, "members": T("group members", members_of, g)} if g else None
+                        a_groups[gid] = {"title": g.title, "owner": g.owner, "access": g.access,
+                                         "members": T("group members", members_of, g)} if g else None
                     except Exception:
                         a_groups[gid] = None
             lf = lb_copy(lb) if lb else None
@@ -404,7 +410,7 @@ def main():
         row = {"run_id": run_id, "checked_at": datetime.datetime.now(), "item_id": a.id, "title": a.title, "item_type": a.type,
                "item_owner": a.owner, "created": ms_date(a.created), "modified": ms_date(a.modified), "backup_year": ms_date(a.created).year,
                "lifeboat_item_id": lb["id"] if lb else "", "lifeboat_created": ms_date(lb.get("created")) if lb else None,
-               **basis, **tests, "passed": ok, "failed_tests": ", ".join(k for k, v in tests.items() if v is False),
+               "access": af["access"], "group_ids": json.dumps(af["groups"]), **basis, **tests, "passed": ok, "failed_tests": ", ".join(k for k, v in tests.items() if v is False),
                "warnings": "; ".join(warns), "detail": json.dumps(detail, default=str), "seconds": round(time.perf_counter() - t0, 2)}
         frame = pd.DataFrame([row])
         for k in TESTS + ["passed"]:
@@ -415,6 +421,10 @@ def main():
         if n % 10 == 0:
             print(f"  {n} of {len(agol_items)} ({checked} checked, {reused} unchanged)")
 
+    if a_groups:
+        db.write(con, "AGOL_Group", pd.DataFrame([{"run_id": run_id, "read_at": now, "group_id": gid, "found": g is not None,
+                                                   "title": (g or {}).get("title"), "owner": (g or {}).get("owner"), "access": (g or {}).get("access"),
+                                                   "members": json.dumps((g or {}).get("members"))} for gid, g in a_groups.items()]), mode="append")
     total = time.perf_counter() - started
     timing = {k: round(v, 1) for k, v in T.s.most_common()}
     db.write(con, "LIFEBOAT_Runs", pd.DataFrame([{"run_id": run_id, "at": now, "from_year": args.from_year, "to_year": args.to_year,

@@ -5,7 +5,7 @@ it never sees the job's own database, which only the job may write (DuckDB allow
 
 What goes in: the snapshots (SNAP_*), the newest member and item reports, RUNS, the person tables the dashboard
 names people from (HIST_Supervisors, HIST_AccountNetIDs, HIST_PersonNames), the account pages the builder writes
-(DASH_*), plus the STATUS_CHANGES view. The rest of the history, and the raw directory and Entra lookups, stay with the job.
+(DASH_*), the Lifeboat check's results (LIFEBOAT_*, AGOL_Group), plus the STATUS_CHANGES view. The rest of the history, and the raw directory and Entra lookups, stay with the job.
 
 The copy is written beside its final name and moved into place, so the site never opens a half-written file.
 
@@ -29,7 +29,9 @@ SERVE_NAME = "agol-serve.duckdb"
 TABLES = ["SNAP_MemberStatus", "SNAP_UnitUsage", "SNAP_RemovalSummary", "RUNS",
           "HIST_Supervisors", "HIST_AccountNetIDs", "HIST_PersonNames", "_meta",
           # the account pages, written by dashboard/build_full_dashboard.py
-          "DASH_Account", "DASH_AccountItems", "DASH_Names", "DASH_ArcgisLogins", "DASH_PersonOf", "DASH_GroupList", "DASH_ViewData", "DASH_Scope", "DASH_Item", "DASH_Contact"]
+          "DASH_Account", "DASH_AccountItems", "DASH_Names", "DASH_ArcgisLogins", "DASH_PersonOf", "DASH_GroupList", "DASH_ViewData", "DASH_Scope", "DASH_Item", "DASH_Contact",
+          # the Lifeboat check's results, for the backup review page (pipeline_daily.lifeboat_results)
+          "LIFEBOAT_Check", "AGOL_Group", "LIFEBOAT_Runs", "LIFEBOAT_RestoredYears"]
 NEWEST = ["OrganizationMembers_", "OrganizationItems_"]
 
 

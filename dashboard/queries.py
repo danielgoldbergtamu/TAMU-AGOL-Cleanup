@@ -331,5 +331,97 @@ def selection(con, named, date="created", year_from=None, year_to=None, tiers=()
     return out
 
 
-VIEWS = {"base": base, "overview": overview, "history": history, "people": people, "review": review}
+BACKUP_TESTS = ["found", "type", "owner", "sharing", "groups", "structure", "counts", "files", "dependencies", "usable", "unchanged"]
+
+
+def backup(con, named):
+    """The backup review page (Dan, 8 November 2026): each checked item's Lifeboat check (tools/lifeboat_check.py,
+    the newest check of each item), and what a decision to delete it weighs: its owner and their status, whom it is
+    shared with (the organization, the public, groups and their members, with their statuses), the items it uses
+    and the checked items that use it, and its warnings. Full edition only. A proposal page: the site deletes nothing.
+
+    Each item gets a standing, in this order:
+      backup failed        a test failed: kept, never offered for deletion until a new check passes
+      year not restored    created in a year not on the reviewed list of restored years: never offered
+      in use               someone current can still use it: the owner is current, it is shared with the organization
+                           or the public, or a group it is shared with has a current member
+      no current users     backed up, and nobody current can use it (Dan: then nobody, an instructor included, is
+                           still using it)
+    """
+    if not named or not has(con, "LIFEBOAT_Check"):
+        return None
+    checks = rows(con, "SELECT * FROM LIFEBOAT_Check QUALIFY ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY checked_at DESC) = 1 "
+                       "ORDER BY backup_year, title")
+    years = {}
+    if has(con, "LIFEBOAT_RestoredYears"):   # the newest export's list
+        years = {y: [o, w] for y, o, w in con.execute("SELECT year, restored_on, said_by FROM LIFEBOAT_RestoredYears "
+                                                     "WHERE exported_at = (SELECT MAX(exported_at) FROM LIFEBOAT_RestoredYears)").fetchall()}
+    groups = {}
+    if has(con, "AGOL_Group"):
+        for g in rows(con, "SELECT * FROM AGOL_Group QUALIFY ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY read_at DESC) = 1"):
+            groups[g["group_id"]] = {**g, "members": json.loads(g["members"] or "null") or []}
+    acct = {}
+    if has(con, "DASH_Account"):
+        for k, cls, proj, prot, supv in con.execute("SELECT key, classification, projected, protected, supervisor FROM DASH_Account").fetchall():
+            acct[norm(k)] = {"classification": cls, "projected": proj, "protected": prot or "", "supervisor": supv or ""}
+    status = lambda u: acct.get(norm(u), {}).get("classification") or "not a member"
+    sizes = {}
+    if has(con, "DASH_Item"):
+        ids = [c["item_id"] for c in checks]
+        for iid, fg, fi, vw in con.execute("SELECT item_id, feature_gb, file_gb, last_viewed FROM DASH_Item WHERE item_id IN (SELECT UNNEST(?))", [ids]).fetchall():
+            sizes[iid] = [r(fg), r(fi), "" if vw is None else str(vw)]
+    titles = {c["item_id"]: c["title"] for c in checks}
+    items_t = newest(con, "OrganizationItems_")
+    deps = {c["item_id"]: (json.loads(c["detail"] or "{}").get("depends_on") or []) for c in checks}
+    wanted = sorted({d for ds in deps.values() for d in ds} - set(titles))
+    if items_t and wanted:
+        titles.update(dict(con.execute(f'SELECT "Item ID", "Title" FROM {q(items_t)} WHERE "Item ID" IN (SELECT UNNEST(?))', [wanted]).fetchall()))
+    used_by = {}
+    for iid, ds in deps.items():
+        for d in ds:
+            used_by.setdefault(d, []).append(iid)
+    out, people = [], set()
+    for c in checks:
+        detail = json.loads(c["detail"] or "{}")
+        gids = json.loads(c["group_ids"]) if c.get("group_ids") else []
+        glist = []
+        for gid in gids:
+            g = groups.get(gid) or {}
+            members = [[m, status(m)] for m in g.get("members", [])]
+            people.update(m for m, _ in members)
+            glist.append({"id": gid, "title": g.get("title") or gid, "owner": g.get("owner") or "", "access": g.get("access") or "",
+                          "members": members, "current": sum(1 for _, s_ in members if s_ == "current")})
+        owner = c["item_owner"] or ""
+        people.add(owner)
+        o = acct.get(norm(owner), {})
+        if o.get("supervisor"):
+            people.add(o["supervisor"])
+        current_users = (["the owner"] if status(owner) == "current" else []) \
+            + ([f"everyone in the organization ({c['access']})"] if c.get("access") in ("org", "public") else []) \
+            + [f"{g['current']} current member{'s' if g['current'] != 1 else ''} of {g['title']}" for g in glist if g["current"]]
+        if not c["passed"]:
+            standing = "backup failed"
+        elif c["backup_year"] not in years:
+            standing = "year not restored"
+        elif current_users or not c.get("access"):   # sharing not recorded (a check before version 6): not offered
+            standing = "in use"
+        else:
+            standing = "no current users"
+        out.append({"item_id": c["item_id"], "title": c["title"], "item_type": c["item_type"], "year": c["backup_year"],
+                    "created": str(c["created"] or ""), "modified": str(c["modified"] or ""), "checked_at": str(c["checked_at"] or ""),
+                    "owner": owner, "owner_status": status(owner), "owner_projected": o.get("projected") or "",
+                    "owner_protected": o.get("protected") or "", "supervisor": o.get("supervisor") or "",
+                    "access": c.get("access") or "", "groups": glist, "current_users": current_users,
+                    "tests": {t: c.get(t) for t in BACKUP_TESTS}, "passed": bool(c["passed"]), "failed_tests": c["failed_tests"] or "",
+                    "detail": {k: v for k, v in detail.items() if k != "depends_on"},
+                    "warnings": [w for w in (c["warnings"] or "").split("; ") if w],
+                    "depends_on": [[d, titles.get(d, "")] for d in deps[c["item_id"]]],
+                    "used_by": [[u, titles.get(u, "")] for u in used_by.get(c["item_id"], [])],
+                    "size": sizes.get(c["item_id"], [0, 0, ""]), "standing": standing})
+    runs_ = rows(con, "SELECT run_id, \"at\", from_year, to_year, items, passed, seconds FROM LIFEBOAT_Runs ORDER BY \"at\" DESC LIMIT 1") if has(con, "LIFEBOAT_Runs") else []
+    return {"edition": "full", "items": out, "restored_years": {str(k): v for k, v in years.items()},
+            "last_run": {k: str(v) for k, v in runs_[0].items()} if runs_ else None, **lookups(con, people)}
+
+
+VIEWS = {"base": base, "overview": overview, "history": history, "people": people, "review": review, "backup": backup}
 KEYED_VIEWS = {"account": account, "group": group, "scope": scope}   # /api/v1/<view>/<key>
